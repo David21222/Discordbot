@@ -1,0 +1,815 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+
+// Configuration using environment variables (safer than hardcoding)
+const CONFIG = {
+    TOKEN: process.env.DISCORD_TOKEN,
+    CLIENT_ID: process.env.CLIENT_ID,
+    GUILD_ID: process.env.GUILD_ID,
+    TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
+    STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
+    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID
+};
+
+// Check if all required variables are loaded
+console.log('🔍 Checking environment variables...');
+if (!CONFIG.TOKEN) {
+    console.error('❌ DISCORD_TOKEN is missing!');
+    process.exit(1);
+}
+console.log('✅ Environment variables loaded successfully');
+
+// Create Discord client
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers
+    ]
+});
+
+// Track active tickets to prevent duplicates
+const activeTickets = new Map();
+
+// Define commands
+const commands = [
+    new SlashCommandBuilder()
+        .setName('shop')
+        .setDescription('Open the David\'s Coins shop')
+        .toJSON()
+];
+
+// Register commands
+const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
+
+async function deployCommands() {
+    try {
+        console.log('Started refreshing application (/) commands.');
+        await rest.put(
+            Routes.applicationGuildCommands(CONFIG.CLIENT_ID, CONFIG.GUILD_ID),
+            { body: commands }
+        );
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error('Error deploying commands:', error);
+    }
+}
+
+// Bot ready event
+client.once('ready', async () => {
+    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
+    await deployCommands();
+});
+
+// Member leave event
+client.on('guildMemberRemove', async (member) => {
+    try {
+        console.log(`Member left: ${member.user.username} (${member.user.id})`);
+        
+        // Check if the user who left had an active ticket
+        if (activeTickets.has(member.user.id)) {
+            const ticketChannelId = activeTickets.get(member.user.id);
+            const ticketChannel = member.guild.channels.cache.get(ticketChannelId);
+            
+            if (ticketChannel) {
+                console.log(`Sending leave message to ticket channel: ${ticketChannel.name}`);
+                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${member.user.id}> left server`);
+                
+                // Remove them from active tickets since they left
+                activeTickets.delete(member.user.id);
+                console.log(`Removed ${member.user.username} from active tickets`);
+            } else {
+                console.log(`Ticket channel not found for ${member.user.username}, removing from active tickets`);
+                activeTickets.delete(member.user.id);
+            }
+        } else {
+            console.log(`${member.user.username} left but had no active ticket`);
+        }
+    } catch (error) {
+        console.error('Error handling member leave:', error);
+    }
+});
+
+// Reaction handler for verification
+client.on('messageReactionAdd', async (reaction, user) => {
+    console.log(`Reaction detected: ${reaction.emoji.name} by ${user.username}`);
+    
+    // Ignore bot reactions
+    if (user.bot) {
+        console.log('Ignoring bot reaction');
+        return;
+    }
+    
+    // Handle partial reactions
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+            console.log('Fetched partial reaction');
+        } catch (error) {
+            console.error('Something went wrong when fetching the reaction:', error);
+            return;
+        }
+    }
+    
+    // Handle verification reaction
+    if (reaction.emoji.name === '✅') {
+        console.log('Checkmark reaction detected');
+        const message = reaction.message;
+        
+        // Check if this is a verification message
+        if (message.embeds.length > 0 && message.embeds[0].title === '✅ Server Verification') {
+            console.log('This is a verification message');
+            const guild = message.guild;
+            
+            try {
+                // Force fetch the member to get fresh data (not cached)
+                const member = await guild.members.fetch({ user: user.id, force: true });
+                console.log(`Fetched member: ${member.user.username}`);
+                console.log(`Member roles: ${member.roles.cache.map(role => role.name).join(', ')}`);
+                
+                // Check if user already has the verified role using CONFIG
+                if (member.roles.cache.has(CONFIG.VERIFIED_ROLE_ID)) {
+                    console.log('User already has verified role');
+                    const alreadyVerifiedEmbed = new EmbedBuilder()
+                        .setTitle("✅ Already Verified")
+                        .setDescription("You are already verified and have access to the server.")
+                        .setColor(0x00ff00);
+                    
+                    await message.channel.send({ 
+                        content: `<@${user.id}>`, 
+                        embeds: [alreadyVerifiedEmbed],
+                        flags: 64 // Ephemeral flag - only user can see this
+                    }).then(msg => {
+                        setTimeout(() => msg.delete().catch(() => {}), 5000);
+                    });
+                    
+                    // Still remove their reaction even if already verified
+                    try {
+                        await reaction.users.remove(user.id);
+                        console.log(`Removed reaction from already verified user ${user.username}`);
+                    } catch (reactionError) {
+                        console.error('Error removing reaction from already verified user:', reactionError);
+                    }
+                    return;
+                }
+                
+                // Add the verified role to the user using CONFIG
+                console.log(`Attempting to add role ${CONFIG.VERIFIED_ROLE_ID} to user ${user.username}`);
+                await member.roles.add(CONFIG.VERIFIED_ROLE_ID);
+                console.log('Role added successfully');
+                
+                // Remove the user's reaction to reset the count
+                try {
+                    await reaction.users.remove(user.id);
+                    console.log(`Removed reaction from ${user.username}`);
+                } catch (reactionError) {
+                    console.error('Error removing reaction:', reactionError);
+                }
+                
+                // Send success message
+                const successEmbed = new EmbedBuilder()
+                    .setTitle("✅ Verification Successful")
+                    .setDescription(`Welcome to **David's Coins**, ${member.displayName}! You now have access to the server.`)
+                    .setColor(0x00ff00);
+                
+                await message.channel.send({ 
+                    content: `<@${user.id}>`, 
+                    embeds: [successEmbed],
+                    flags: 64 // Ephemeral flag - only user can see this
+                }).then(msg => {
+                    setTimeout(() => msg.delete().catch(() => {}), 10000);
+                });
+                
+            } catch (error) {
+                console.error('Error in verification process:', error);
+                
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle("❌ Verification Error")
+                    .setDescription(`There was an error during verification: ${error.message}. Please contact staff for assistance.`)
+                    .setColor(0xff0000);
+                
+                await message.channel.send({ 
+                    content: `<@${user.id}>`, 
+                    embeds: [errorEmbed],
+                    flags: 64 // Ephemeral flag - only user can see this
+                }).then(msg => {
+                    setTimeout(() => msg.delete().catch(() => {}), 10000);
+                });
+            }
+        } else {
+            console.log('Not a verification message');
+        }
+    } else {
+        console.log(`Different emoji: ${reaction.emoji.name}`);
+    }
+});
+
+// Message handler for commands
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    
+    if (message.content === '!info') {
+        const embed = new EmbedBuilder()
+            .setTitle("David's Coins")
+            .setColor(0x5865F2)
+            .addFields(
+                {
+                    name: "Coins Buy Prices:",
+                    value: "• 0.045/m for 300m-1b ($45 per 1B)\n• 0.04/m for 1b+ ($40 per 1B)",
+                    inline: false
+                },
+                {
+                    name: "Coins Sell Prices:",
+                    value: "• 0.012/m for 1b+ ($12 per 1B)",
+                    inline: false
+                },
+                {
+                    name: "Payment Methods:",
+                    value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
+                    inline: false
+                }
+            );
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('buy_coins')
+                    .setLabel('Buy')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('sell_coins')
+                    .setLabel('Sell')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
+        await message.reply({ embeds: [embed], components: [row] });
+        
+        // Delete the user's command message
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!rules') {
+        const rulesEmbed = new EmbedBuilder()
+            .setTitle("📋 Server Rules")
+            .setColor(0xff6b6b)
+            .setDescription("Please follow these rules to ensure a safe and professional trading environment:")
+            .addFields(
+                {
+                    name: "**1. Have basic human decency**",
+                    value: "Treat all members with respect and courtesy.",
+                    inline: false
+                },
+                {
+                    name: "**2. Don't advertise in chat or in DMs**",
+                    value: "No promotion of other services or unsolicited messages.",
+                    inline: false
+                },
+                {
+                    name: "**3. Don't attempt to scam**",
+                    value: "Any fraudulent activity will result in immediate ban.",
+                    inline: false
+                },
+                {
+                    name: "**4. Don't spam the ticket system**",
+                    value: "Only create tickets for legitimate transactions.",
+                    inline: false
+                },
+                {
+                    name: "**5. Don't leak other players' IGNs**",
+                    value: "Respect privacy and keep player information confidential.",
+                    inline: false
+                },
+                {
+                    name: "**6. Communicate through English**",
+                    value: "All communication must be in English for clarity.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "Violation of these rules may result in warnings, mutes, or permanent bans." });
+
+        await message.reply({ embeds: [rulesEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!tos') {
+        const tosEmbed = new EmbedBuilder()
+            .setTitle("📜 Terms of Service")
+            .setColor(0xffa500)
+            .setDescription("**Once you join David's Coins, you're automatically agreeing to the following terms:**")
+            .addFields(
+                {
+                    name: "1. No Refunds",
+                    value: "There are no refunds once the transaction has taken place.",
+                    inline: false
+                },
+                {
+                    name: "2. Chargeback Policy",
+                    value: "Any and all chargebacks will result in a permanent ban from our discord server.",
+                    inline: false
+                },
+                {
+                    name: "3. Payment Verification",
+                    value: "By purchasing any goods from us you acknowledge that the money is totally yours.",
+                    inline: false
+                },
+                {
+                    name: "4. Ban Rights",
+                    value: "We reserve the right to ban anyone from our discord server at any point in time for any reason, any paid for and not received items will get refunded.",
+                    inline: false
+                },
+                {
+                    name: "5. Service Refusal",
+                    value: "We reserve the right to refuse service to anyone at anytime.",
+                    inline: false
+                },
+                {
+                    name: "6. Server Protection",
+                    value: "If any damage is caused onto our server by you, we reserve the right to ban you without a refund.",
+                    inline: false
+                },
+                {
+                    name: "7. Terms Changes",
+                    value: "These terms are subject to change at any time without notice to the client.",
+                    inline: false
+                },
+                {
+                    name: "8. Price Changes",
+                    value: "We reserve the right to change the price of our products at any time we want.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "By using our services, you agree to these terms and conditions." });
+
+        await message.reply({ embeds: [tosEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!verify') {
+        const verifyEmbed = new EmbedBuilder()
+            .setTitle("✅ Server Verification")
+            .setColor(0x00ff00)
+            .setDescription("Welcome to **David's Coins**!\n\nClick the ✅ reaction below to verify yourself and gain access to the server.");
+
+        const verifyMessage = await message.reply({ embeds: [verifyEmbed] });
+        
+        // Add checkmark reaction
+        await verifyMessage.react('✅');
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!payments') {
+        const paymentsEmbed = new EmbedBuilder()
+            .setTitle("💳 Payment Methods")
+            .setColor(0x2ecc71)
+            .setDescription("**David's Coins** accepts the following secure payment methods for all transactions:")
+            .addFields(
+                {
+                    name: "🪙 **Primary Cryptocurrencies**",
+                    value: "<:BTC:1387494854497669242> **Bitcoin (BTC)**\n<:ETH:1387494868531675226> **Ethereum (ETH)**\n<:LTC:1387494812269412372> **Litecoin (LTC)**\n<:USDT:1387494839855218798> **Tether (USDT)**",
+                    inline: false
+                },
+                {
+                    name: "⚡ **Why Cryptocurrency?**",
+                    value: "• **Fast transactions** - Nearly instant transfers\n• **Low fees** - Minimal processing costs\n• **Secure** - Blockchain-verified transactions\n• **Global** - Available worldwide 24/7",
+                    inline: false
+                },
+                {
+                    name: "**Additional Payment Options**",
+                    value: "We may accept other payment methods on a case-by-case basis. Please contact our staff through a ticket to discuss alternative payment arrangements.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Secure & Professional Trading • All transactions are final" });
+
+        await message.reply({ embeds: [paymentsEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!crypto') {
+        const cryptoEmbed = new EmbedBuilder()
+            .setTitle("🪙 Cryptocurrency Wallet Addresses")
+            .setColor(0xf39c12)
+            .setDescription("**Send payments to the addresses below:**")
+            .addFields(
+                {
+                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
+                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
+                    inline: false
+                },
+                {
+                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
+                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
+                    inline: false
+                },
+                {
+                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
+                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
+                    inline: false
+                },
+                {
+                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
+                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
+
+        const cryptoButtons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('copy_ltc')
+                    .setLabel('Copy LTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494812269412372'),
+                new ButtonBuilder()
+                    .setCustomId('copy_btc')
+                    .setLabel('Copy BTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494854497669242'),
+                new ButtonBuilder()
+                    .setCustomId('copy_eth')
+                    .setLabel('Copy ETH')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494868531675226'),
+                new ButtonBuilder()
+                    .setCustomId('copy_usdt')
+                    .setLabel('Copy USDT')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494839855218798')
+            );
+
+        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!help') {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle("📚 Available Commands")
+            .setColor(0x7289da)
+            .setDescription("Here are all the available commands for **David's Coins**:")
+            .addFields(
+                {
+                    name: "🛒 **!info**",
+                    value: "View shop information, prices, and payment methods with Buy/Sell buttons",
+                    inline: false
+                },
+                {
+                    name: "📋 **!rules**",
+                    value: "Display server rules and guidelines for a safe trading environment",
+                    inline: false
+                },
+                {
+                    name: "📜 **!tos**",
+                    value: "View our Terms of Service and important legal information",
+                    inline: false
+                },
+                {
+                    name: "💳 **!payments**",
+                    value: "View accepted payment methods and transaction information",
+                    inline: false
+                },
+                {
+                    name: "🪙 **!crypto**",
+                    value: "Display cryptocurrency wallet addresses for payments",
+                    inline: false
+                },
+                {
+                    name: "✅ **!verify**",
+                    value: "Verify yourself to gain access to the server (react with ✅)",
+                    inline: false
+                },
+                {
+                    name: "📚 **!help**",
+                    value: "Show this help menu with all available commands",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
+
+        await message.reply({ embeds: [helpEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+});
+
+// Interaction handler
+client.on('interactionCreate', async (interaction) => {
+    try {
+        // Handle slash commands
+        if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'shop') {
+                const embed = new EmbedBuilder()
+                    .setTitle("David's Coins")
+                    .setColor(0x5865F2)
+                    .addFields(
+                        {
+                            name: "Coins Buy Prices:",
+                            value: "• 0.045/m for 300m-1b ($45 per 1B)\n• 0.04/m for 1b+ ($40 per 1B)",
+                            inline: false
+                        },
+                        {
+                            name: "Coins Sell Prices:",
+                            value: "• 0.012/m for 1b+ ($12 per 1B)",
+                            inline: false
+                        },
+                        {
+                            name: "Payment Methods:",
+                            value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
+                            inline: false
+                        }
+                    );
+
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('buy_coins')
+                            .setLabel('Buy')
+                            .setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder()
+                            .setCustomId('sell_coins')
+                            .setLabel('Sell')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+
+                await interaction.reply({ embeds: [embed], components: [row] });
+            }
+        }
+
+        // Handle button interactions
+        if (interaction.isButton()) {
+            // Handle crypto copy buttons
+            if (interaction.customId.startsWith('copy_')) {
+                const walletAddresses = {
+                    'copy_ltc': 'MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43',
+                    'copy_btc': '3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu', 
+                    'copy_eth': '0x753488DE45f33047806ac23B2693d87167829E08',
+                    'copy_usdt': '0xC41199c503C615554fA97803db6a688685e567D5'
+                };
+                
+                const address = walletAddresses[interaction.customId];
+                const cryptoName = interaction.customId.replace('copy_', '').toUpperCase();
+                
+                if (address) {
+                    await interaction.reply({
+                        content: `**${cryptoName} Address:**\n\`${address}\``,
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.reply({
+                        content: 'Error: Address not found.',
+                        ephemeral: true
+                    });
+                }
+                return;
+            }
+            
+            if (interaction.customId === 'buy_coins' || interaction.customId === 'sell_coins') {
+                // Check if user already has an active ticket
+                if (activeTickets.has(interaction.user.id)) {
+                    return await interaction.reply({
+                        content: 'You already have an active ticket open. Please complete your current transaction before opening a new one.',
+                        ephemeral: true
+                    });
+                }
+
+                const isBuying = interaction.customId === 'buy_coins';
+                const action = isBuying ? 'Buy Coins for Crypto!' : 'Sell Coins for Crypto!';
+                
+                const modal = new ModalBuilder()
+                    .setCustomId(isBuying ? 'buy_modal' : 'sell_modal')
+                    .setTitle(action);
+
+                const ignInput = new TextInputBuilder()
+                    .setCustomId('ign_input')
+                    .setLabel('What\'s The Ign?')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMinLength(3)
+                    .setMaxLength(16);
+
+                const amountInput = new TextInputBuilder()
+                    .setCustomId('amount_input')
+                    .setLabel(isBuying ? 'How Much Do You Want To Buy?' : 'How Much Do You Want To Sell?')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(15);
+
+                const firstRow = new ActionRowBuilder().addComponents(ignInput);
+                const secondRow = new ActionRowBuilder().addComponents(amountInput);
+
+                modal.addComponents(firstRow, secondRow);
+                await interaction.showModal(modal);
+            }
+        }
+
+        // Handle modal submissions
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'buy_modal' || interaction.customId === 'sell_modal') {
+                const isBuying = interaction.customId === 'buy_modal';
+                const ign = interaction.fields.getTextInputValue('ign_input');
+                const amount = interaction.fields.getTextInputValue('amount_input');
+
+                // Create ticket channel
+                const guild = interaction.guild;
+                const username = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                const ticketChannel = await guild.channels.create({
+                    name: `ticket-${username}`,
+                    type: ChannelType.GuildText,
+                    parent: CONFIG.TICKET_CATEGORY_ID,
+                    permissionOverwrites: [
+                        {
+                            id: guild.roles.everyone.id,
+                            deny: [PermissionFlagsBits.ViewChannel]
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ]
+                        },
+                        {
+                            id: CONFIG.STAFF_ROLE_ID,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.ManageChannels
+                            ]
+                        }
+                    ]
+                });
+
+                // Add to active tickets
+                activeTickets.set(interaction.user.id, ticketChannel.id);
+
+                // Calculate price
+                let rate = 0;
+                let totalPrice = 0;
+                
+                if (isBuying) {
+                    const cleanAmount = amount.toLowerCase().replace(/[^0-9.]/g, '');
+                    const numericAmount = parseFloat(cleanAmount);
+                    
+                    if (amount.toLowerCase().includes('b')) {
+                        const amountInM = numericAmount * 1000;
+                        rate = 0.04;
+                        totalPrice = amountInM * rate;
+                    } else {
+                        if (numericAmount >= 1000) {
+                            rate = 0.04;
+                        } else if (numericAmount >= 300) {
+                            rate = 0.045;
+                        } else {
+                            rate = 0.045;
+                        }
+                        totalPrice = numericAmount * rate;
+                    }
+                } else {
+                    const cleanAmount = amount.toLowerCase().replace(/[^0-9.]/g, '');
+                    const numericAmount = parseFloat(cleanAmount);
+                    const amountInM = amount.toLowerCase().includes('b') ? numericAmount * 1000 : numericAmount;
+                    rate = 0.012;
+                    totalPrice = amountInM * rate;
+                }
+
+                const transactionEmbed = new EmbedBuilder()
+                    .setTitle(isBuying ? 'Crypto Purchase' : 'Crypto Sale')
+                    .setColor(0x00ff00)
+                    .setDescription('A Seller will reply shortly!')
+                    .addFields(
+                        { name: 'IGN:', value: ign, inline: true },
+                        { name: `User is ${isBuying ? 'buying' : 'selling'}:`, value: amount, inline: true }
+                    );
+
+                if (totalPrice > 0) {
+                    transactionEmbed.addFields(
+                        { name: 'Cost Details:', value: `You are ${isBuying ? 'buying' : 'selling'} ${amount} coins for ${totalPrice.toFixed(2)} at a rate of ${rate}/m.`, inline: false }
+                    );
+                }
+
+                transactionEmbed.setFooter({ text: `David's Coins | Made by David • Today at ${new Date().toLocaleTimeString()}` });
+
+                // Close ticket button
+                const closeRow = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('close_ticket')
+                            .setLabel('🔒 Close Ticket')
+                            .setStyle(ButtonStyle.Danger)
+                    );
+
+                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${interaction.user.id}> is ${isBuying ? 'buying' : 'selling'} "${amount}"!`);
+                await ticketChannel.send({ embeds: [transactionEmbed], components: [closeRow] });
+
+                await interaction.reply({
+                    content: `✅ Ticket created successfully! ${ticketChannel}`,
+                    ephemeral: true
+                });
+            }
+        }
+
+        // Handle close ticket button
+        if (interaction.isButton() && interaction.customId === 'close_ticket') {
+            const channel = interaction.channel;
+            const member = interaction.member;
+            
+            if (!member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+                return await interaction.reply({
+                    content: 'Only staff members can close tickets.',
+                    ephemeral: true
+                });
+            }
+            
+            // Remove from active tickets
+            for (const [userId, channelId] of activeTickets) {
+                if (channelId === channel.id) {
+                    activeTickets.delete(userId);
+                    break;
+                }
+            }
+
+            await interaction.reply('This ticket will be closed in 5 seconds...');
+            
+            setTimeout(async () => {
+                try {
+                    await channel.delete();
+                } catch (error) {
+                    console.error('Error deleting channel:', error);
+                }
+            }, 5000);
+        }
+
+    } catch (error) {
+        console.error('Error handling interaction:', error);
+        
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: 'Something went wrong. Please try again.',
+                    ephemeral: true
+                });
+            }
+        } catch (replyError) {
+            console.error('Error sending error response:', replyError);
+        }
+    }
+});
+
+// Error handling
+client.on('error', (error) => {
+    console.error('Discord client error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+// Login to Discord
+console.log('🚀 Starting bot...');
+client.login(CONFIG.TOKEN).then(() => {
+    console.log('✅ Bot login successful!');
+}).catch((error) => {
+    console.error('❌ Bot login failed:', error);
+    process.exit(1);
+});
