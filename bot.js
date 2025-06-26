@@ -1,7 +1,7 @@
 // Load environment variables from .env file
 require('dotenv').config();
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 
 // Configuration using environment variables (safer than hardcoding)
 const CONFIG = {
@@ -10,7 +10,8 @@ const CONFIG = {
     GUILD_ID: process.env.GUILD_ID,
     TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
     STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
-    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID
+    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
+    TRANSCRIPT_CHANNEL_ID: '1387582544278585487'
 };
 
 // Check if all required variables are loaded
@@ -32,185 +33,41 @@ const client = new Client({
     ]
 });
 
-// Track active tickets to prevent duplicates
+// Track active tickets to prevent duplicates and store messages
 const activeTickets = new Map();
-
-// Define commands
-const commands = [
-    new SlashCommandBuilder()
-        .setName('shop')
-        .setDescription('Open the David\'s Coins shop')
-        .toJSON()
-];
-
-// Register commands
-const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
-
-async function deployCommands() {
-    try {
-        console.log('Started refreshing application (/) commands.');
-        await rest.put(
-            Routes.applicationGuildCommands(CONFIG.CLIENT_ID, CONFIG.GUILD_ID),
-            { body: commands }
-        );
-        console.log('Successfully reloaded application (/) commands.');
-    } catch (error) {
-        console.error('Error deploying commands:', error);
-    }
-}
+const ticketMessages = new Map(); // Store messages for each ticket
 
 // Bot ready event
 client.once('ready', async () => {
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
     console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
-    await deployCommands();
 });
 
-// Member leave event
-client.on('guildMemberRemove', async (member) => {
-    try {
-        console.log(`Member left: ${member.user.username} (${member.user.id})`);
-        
-        // Check if the user who left had an active ticket
-        if (activeTickets.has(member.user.id)) {
-            const ticketChannelId = activeTickets.get(member.user.id);
-            const ticketChannel = member.guild.channels.cache.get(ticketChannelId);
-            
-            if (ticketChannel) {
-                console.log(`Sending leave message to ticket channel: ${ticketChannel.name}`);
-                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${member.user.id}> left server`);
-                
-                // Remove them from active tickets since they left
-                activeTickets.delete(member.user.id);
-                console.log(`Removed ${member.user.username} from active tickets`);
-            } else {
-                console.log(`Ticket channel not found for ${member.user.username}, removing from active tickets`);
-                activeTickets.delete(member.user.id);
-            }
-        } else {
-            console.log(`${member.user.username} left but had no active ticket`);
-        }
-    } catch (error) {
-        console.error('Error handling member leave:', error);
-    }
-});
-
-// Reaction handler for verification
-client.on('messageReactionAdd', async (reaction, user) => {
-    console.log(`Reaction detected: ${reaction.emoji.name} by ${user.username}`);
-    
-    // Ignore bot reactions
-    if (user.bot) {
-        console.log('Ignoring bot reaction');
-        return;
-    }
-    
-    // Handle partial reactions
-    if (reaction.partial) {
-        try {
-            await reaction.fetch();
-            console.log('Fetched partial reaction');
-        } catch (error) {
-            console.error('Something went wrong when fetching the reaction:', error);
-            return;
-        }
-    }
-    
-    // Handle verification reaction
-    if (reaction.emoji.name === '✅') {
-        console.log('Checkmark reaction detected');
-        const message = reaction.message;
-        
-        // Check if this is a verification message
-        if (message.embeds.length > 0 && message.embeds[0].title === '✅ Server Verification') {
-            console.log('This is a verification message');
-            const guild = message.guild;
-            
-            try {
-                // Force fetch the member to get fresh data (not cached)
-                const member = await guild.members.fetch({ user: user.id, force: true });
-                console.log(`Fetched member: ${member.user.username}`);
-                console.log(`Member roles: ${member.roles.cache.map(role => role.name).join(', ')}`);
-                
-                // Check if user already has the verified role using CONFIG
-                if (member.roles.cache.has(CONFIG.VERIFIED_ROLE_ID)) {
-                    console.log('User already has verified role');
-                    const alreadyVerifiedEmbed = new EmbedBuilder()
-                        .setTitle("✅ Already Verified")
-                        .setDescription("You are already verified and have access to the server.")
-                        .setColor(0x00ff00);
-                    
-                    await message.channel.send({ 
-                        content: `<@${user.id}>`, 
-                        embeds: [alreadyVerifiedEmbed],
-                        flags: 64 // Ephemeral flag - only user can see this
-                    }).then(msg => {
-                        setTimeout(() => msg.delete().catch(() => {}), 5000);
-                    });
-                    
-                    // Still remove their reaction even if already verified
-                    try {
-                        await reaction.users.remove(user.id);
-                        console.log(`Removed reaction from already verified user ${user.username}`);
-                    } catch (reactionError) {
-                        console.error('Error removing reaction from already verified user:', reactionError);
-                    }
-                    return;
-                }
-                
-                // Add the verified role to the user using CONFIG
-                console.log(`Attempting to add role ${CONFIG.VERIFIED_ROLE_ID} to user ${user.username}`);
-                await member.roles.add(CONFIG.VERIFIED_ROLE_ID);
-                console.log('Role added successfully');
-                
-                // Remove the user's reaction to reset the count
-                try {
-                    await reaction.users.remove(user.id);
-                    console.log(`Removed reaction from ${user.username}`);
-                } catch (reactionError) {
-                    console.error('Error removing reaction:', reactionError);
-                }
-                
-                // Send success message
-                const successEmbed = new EmbedBuilder()
-                    .setTitle("✅ Verification Successful")
-                    .setDescription(`Welcome to **David's Coins**, ${member.displayName}! You now have access to the server.`)
-                    .setColor(0x00ff00);
-                
-                await message.channel.send({ 
-                    content: `<@${user.id}>`, 
-                    embeds: [successEmbed],
-                    flags: 64 // Ephemeral flag - only user can see this
-                }).then(msg => {
-                    setTimeout(() => msg.delete().catch(() => {}), 10000);
-                });
-                
-            } catch (error) {
-                console.error('Error in verification process:', error);
-                
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle("❌ Verification Error")
-                    .setDescription(`There was an error during verification: ${error.message}. Please contact staff for assistance.`)
-                    .setColor(0xff0000);
-                
-                await message.channel.send({ 
-                    content: `<@${user.id}>`, 
-                    embeds: [errorEmbed],
-                    flags: 64 // Ephemeral flag - only user can see this
-                }).then(msg => {
-                    setTimeout(() => msg.delete().catch(() => {}), 10000);
-                });
-            }
-        } else {
-            console.log('Not a verification message');
-        }
-    } else {
-        console.log(`Different emoji: ${reaction.emoji.name}`);
-    }
-});
-
-// Message handler for commands
+// Message handler to track ticket messages
 client.on('messageCreate', async (message) => {
+    // Track messages in ticket channels
+    if (message.channel.name && message.channel.name.startsWith('ticket-')) {
+        if (!ticketMessages.has(message.channel.id)) {
+            ticketMessages.set(message.channel.id, []);
+        }
+        
+        // Store message data
+        const messageData = {
+            timestamp: new Date(),
+            author: message.author.username,
+            authorId: message.author.id,
+            content: message.content,
+            embeds: message.embeds.map(embed => ({
+                title: embed.title,
+                description: embed.description,
+                fields: embed.fields
+            })),
+            isBot: message.author.bot
+        };
+        
+        ticketMessages.get(message.channel.id).push(messageData);
+    }
+    
     if (message.author.bot) return;
     
     if (message.content === '!info') {
@@ -530,49 +387,211 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Member leave event
+client.on('guildMemberRemove', async (member) => {
+    try {
+        console.log(`Member left: ${member.user.username} (${member.user.id})`);
+        
+        // Check if the user who left had an active ticket
+        if (activeTickets.has(member.user.id)) {
+            const ticketChannelId = activeTickets.get(member.user.id);
+            const ticketChannel = member.guild.channels.cache.get(ticketChannelId);
+            
+            if (ticketChannel) {
+                console.log(`Sending leave message to ticket channel: ${ticketChannel.name}`);
+                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${member.user.id}> left server`);
+                
+                // Remove them from active tickets since they left
+                activeTickets.delete(member.user.id);
+                console.log(`Removed ${member.user.username} from active tickets`);
+            } else {
+                console.log(`Ticket channel not found for ${member.user.username}, removing from active tickets`);
+                activeTickets.delete(member.user.id);
+            }
+        } else {
+            console.log(`${member.user.username} left but had no active ticket`);
+        }
+    } catch (error) {
+        console.error('Error handling member leave:', error);
+    }
+});
+
+// Reaction handler for verification
+client.on('messageReactionAdd', async (reaction, user) => {
+    console.log(`Reaction detected: ${reaction.emoji.name} by ${user.username}`);
+    
+    // Ignore bot reactions
+    if (user.bot) {
+        console.log('Ignoring bot reaction');
+        return;
+    }
+    
+    // Handle partial reactions
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+            console.log('Fetched partial reaction');
+        } catch (error) {
+            console.error('Something went wrong when fetching the reaction:', error);
+            return;
+        }
+    }
+    
+    // Handle verification reaction
+    if (reaction.emoji.name === '✅') {
+        console.log('Checkmark reaction detected');
+        const message = reaction.message;
+        
+        // Check if this is a verification message
+        if (message.embeds.length > 0 && message.embeds[0].title === '✅ Server Verification') {
+            console.log('This is a verification message');
+            const guild = message.guild;
+            
+            try {
+                // Force fetch the member to get fresh data (not cached)
+                const member = await guild.members.fetch({ user: user.id, force: true });
+                console.log(`Fetched member: ${member.user.username}`);
+                console.log(`Member roles: ${member.roles.cache.map(role => role.name).join(', ')}`);
+                
+                // Check if user already has the verified role using CONFIG
+                if (member.roles.cache.has(CONFIG.VERIFIED_ROLE_ID)) {
+                    console.log('User already has verified role');
+                    const alreadyVerifiedEmbed = new EmbedBuilder()
+                        .setTitle("✅ Already Verified")
+                        .setDescription("You are already verified and have access to the server.")
+                        .setColor(0x00ff00);
+                    
+                    await message.channel.send({ 
+                        content: `<@${user.id}>`, 
+                        embeds: [alreadyVerifiedEmbed],
+                        flags: 64 // Ephemeral flag - only user can see this
+                    }).then(msg => {
+                        setTimeout(() => msg.delete().catch(() => {}), 5000);
+                    });
+                    
+                    // Still remove their reaction even if already verified
+                    try {
+                        await reaction.users.remove(user.id);
+                        console.log(`Removed reaction from already verified user ${user.username}`);
+                    } catch (reactionError) {
+                        console.error('Error removing reaction from already verified user:', reactionError);
+                    }
+                    return;
+                }
+                
+                // Add the verified role to the user using CONFIG
+                console.log(`Attempting to add role ${CONFIG.VERIFIED_ROLE_ID} to user ${user.username}`);
+                await member.roles.add(CONFIG.VERIFIED_ROLE_ID);
+                console.log('Role added successfully');
+                
+                // Remove the user's reaction to reset the count
+                try {
+                    await reaction.users.remove(user.id);
+                    console.log(`Removed reaction from ${user.username}`);
+                } catch (reactionError) {
+                    console.error('Error removing reaction:', reactionError);
+                }
+                
+                // Send success message
+                const successEmbed = new EmbedBuilder()
+                    .setTitle("✅ Verification Successful")
+                    .setDescription(`Welcome to **David's Coins**, ${member.displayName}! You now have access to the server.`)
+                    .setColor(0x00ff00);
+                
+                await message.channel.send({ 
+                    content: `<@${user.id}>`, 
+                    embeds: [successEmbed],
+                    flags: 64 // Ephemeral flag - only user can see this
+                }).then(msg => {
+                    setTimeout(() => msg.delete().catch(() => {}), 10000);
+                });
+                
+            } catch (error) {
+                console.error('Error in verification process:', error);
+                
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle("❌ Verification Error")
+                    .setDescription(`There was an error during verification: ${error.message}. Please contact staff for assistance.`)
+                    .setColor(0xff0000);
+                
+                await message.channel.send({ 
+                    content: `<@${user.id}>`, 
+                    embeds: [errorEmbed],
+                    flags: 64 // Ephemeral flag - only user can see this
+                }).then(msg => {
+                    setTimeout(() => msg.delete().catch(() => {}), 10000);
+                });
+            }
+        } else {
+            console.log('Not a verification message');
+        }
+    } else {
+        console.log(`Different emoji: ${reaction.emoji.name}`);
+    }
+});
+
+// Function to generate transcript
+async function generateTranscript(channelId, channelName, ticketInfo = {}) {
+    const messages = ticketMessages.get(channelId) || [];
+    
+    let transcript = `TICKET TRANSCRIPT - ${channelName}\n`;
+    transcript += `Created: ${new Date().toLocaleString()}\n`;
+    transcript += `Ticket Channel ID: ${channelId}\n\n`;
+    
+    // Add ticket info if available
+    if (ticketInfo.ign) {
+        transcript += `IGN: ${ticketInfo.ign}\n`;
+    }
+    if (ticketInfo.transaction) {
+        transcript += `Transaction: ${ticketInfo.transaction}\n`;
+    }
+    if (ticketInfo.cost) {
+        transcript += `Cost: ${ticketInfo.cost}\n`;
+    }
+    
+    transcript += `\n--- CONVERSATION ---\n\n`;
+    
+    // Add all messages
+    for (const msg of messages) {
+        const time = msg.timestamp.toLocaleTimeString();
+        const author = msg.isBot ? `${msg.author} [BOT]` : msg.author;
+        
+        transcript += `[${time}] ${author}: `;
+        
+        if (msg.content) {
+            transcript += `${msg.content}\n`;
+        }
+        
+        // Add embed information
+        if (msg.embeds && msg.embeds.length > 0) {
+            for (const embed of msg.embeds) {
+                if (embed.title) {
+                    transcript += `    [EMBED] Title: ${embed.title}\n`;
+                }
+                if (embed.description) {
+                    transcript += `    [EMBED] Description: ${embed.description}\n`;
+                }
+                if (embed.fields && embed.fields.length > 0) {
+                    for (const field of embed.fields) {
+                        transcript += `    [EMBED] ${field.name}: ${field.value}\n`;
+                    }
+                }
+            }
+        }
+        
+        transcript += `\n`;
+    }
+    
+    transcript += `--- END TRANSCRIPT ---\n`;
+    transcript += `Transcript generated on: ${new Date().toLocaleString()}\n`;
+    transcript += `David's Coins | Ticket System`;
+    
+    return transcript;
+}
+
 // Interaction handler
 client.on('interactionCreate', async (interaction) => {
     try {
-        // Handle slash commands
-        if (interaction.isChatInputCommand()) {
-            if (interaction.commandName === 'shop') {
-                const embed = new EmbedBuilder()
-                    .setTitle("David's Coins")
-                    .setColor(0x5865F2)
-                    .addFields(
-                        {
-                            name: "Coins Buy Prices:",
-                            value: "• 0.045/m for 300m-1b ($45 per 1B)\n• 0.04/m for 1b+ ($40 per 1B)",
-                            inline: false
-                        },
-                        {
-                            name: "Coins Sell Prices:",
-                            value: "• 0.012/m for 1b+ ($12 per 1B)",
-                            inline: false
-                        },
-                        {
-                            name: "Payment Methods:",
-                            value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
-                            inline: false
-                        }
-                    );
-
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId('buy_coins')
-                            .setLabel('Buy')
-                            .setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder()
-                            .setCustomId('sell_coins')
-                            .setLabel('Sell')
-                            .setStyle(ButtonStyle.Secondary)
-                    );
-
-                await interaction.reply({ embeds: [embed], components: [row] });
-            }
-        }
-
         // Handle button interactions
         if (interaction.isButton()) {
             // Handle crypto copy buttons
@@ -682,6 +701,9 @@ client.on('interactionCreate', async (interaction) => {
 
                 // Add to active tickets
                 activeTickets.set(interaction.user.id, ticketChannel.id);
+                
+                // Initialize message tracking for this ticket
+                ticketMessages.set(ticketChannel.id, []);
 
                 // Calculate price
                 let rate = 0;
@@ -730,6 +752,20 @@ client.on('interactionCreate', async (interaction) => {
 
                 transactionEmbed.setFooter({ text: `David's Coins | Made by David • Today at ${new Date().toLocaleTimeString()}` });
 
+                // Store ticket info for transcript
+                const ticketInfo = {
+                    ign: ign,
+                    transaction: `${isBuying ? 'Buying' : 'Selling'} ${amount}`,
+                    cost: totalPrice > 0 ? `${totalPrice.toFixed(2)} at ${rate}/m rate` : 'Price not calculated',
+                    user: interaction.user.username,
+                    userId: interaction.user.id
+                };
+
+                // Store ticket info in a map for later use
+                if (!ticketChannel.ticketInfo) {
+                    ticketChannel.ticketInfo = ticketInfo;
+                }
+
                 // Close ticket button
                 const closeRow = new ActionRowBuilder()
                     .addComponents(
@@ -761,6 +797,49 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
             
+            await interaction.reply('Generating transcript and closing ticket in 5 seconds...');
+            
+            // Generate and send transcript
+            try {
+                const transcriptContent = await generateTranscript(
+                    channel.id, 
+                    channel.name,
+                    channel.ticketInfo || {}
+                );
+                
+                // Create transcript file
+                const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
+                const attachment = new AttachmentBuilder(transcriptBuffer, { 
+                    name: `transcript-${channel.name}.txt` 
+                });
+                
+                // Send transcript to transcript channel
+                const transcriptChannel = interaction.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
+                if (transcriptChannel) {
+                    const transcriptEmbed = new EmbedBuilder()
+                        .setTitle('📄 Ticket Transcript')
+                        .setDescription(`Transcript for ${channel.name}`)
+                        .addFields(
+                            { name: 'Ticket Channel', value: channel.name, inline: true },
+                            { name: 'Closed By', value: member.user.username, inline: true },
+                            { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                        )
+                        .setColor(0x2ecc71)
+                        .setFooter({ text: 'David\'s Coins | Ticket System' });
+                    
+                    await transcriptChannel.send({ 
+                        embeds: [transcriptEmbed], 
+                        files: [attachment] 
+                    });
+                    
+                    console.log(`Transcript sent to channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} for ticket ${channel.name}`);
+                } else {
+                    console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
+                }
+            } catch (error) {
+                console.error('Error generating transcript:', error);
+            }
+            
             // Remove from active tickets
             for (const [userId, channelId] of activeTickets) {
                 if (channelId === channel.id) {
@@ -768,9 +847,10 @@ client.on('interactionCreate', async (interaction) => {
                     break;
                 }
             }
-
-            await interaction.reply('This ticket will be closed in 5 seconds...');
             
+            // Clean up message tracking
+            ticketMessages.delete(channel.id);
+
             setTimeout(async () => {
                 try {
                     await channel.delete();
