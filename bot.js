@@ -373,6 +373,11 @@ client.on('messageCreate', async (message) => {
                     name: "📚 **!help**",
                     value: "Show this help menu with all available commands",
                     inline: false
+                },
+                {
+                    name: "🔒 **!close**",
+                    value: "Close a ticket (staff only, must be used in ticket channels)",
+                    inline: false
                 }
             )
             .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
@@ -383,6 +388,86 @@ client.on('messageCreate', async (message) => {
             await message.delete();
         } catch (error) {
             console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!close') {
+        // Check if this is a ticket channel
+        if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
+            return await message.reply('This command can only be used in ticket channels.');
+        }
+        
+        // Check if user has staff role
+        if (!message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+            return await message.reply('Only staff members can close tickets.');
+        }
+        
+        await message.reply('Generating transcript and closing ticket in 5 seconds...');
+        
+        // Generate and send transcript
+        try {
+            const transcriptContent = await generateTranscript(
+                message.channel.id, 
+                message.channel.name,
+                message.channel.ticketInfo || {}
+            );
+            
+            // Create transcript file
+            const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
+            const attachment = new AttachmentBuilder(transcriptBuffer, { 
+                name: `transcript-${message.channel.name}.txt` 
+            });
+            
+            // Send transcript to transcript channel
+            const transcriptChannel = message.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
+            if (transcriptChannel) {
+                const transcriptEmbed = new EmbedBuilder()
+                    .setTitle('📄 Ticket Transcript')
+                    .setDescription(`Transcript for ${message.channel.name}`)
+                    .addFields(
+                        { name: 'Ticket Channel', value: message.channel.name, inline: true },
+                        { name: 'Closed By', value: message.author.username, inline: true },
+                        { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                    )
+                    .setColor(0x2ecc71)
+                    .setFooter({ text: 'David\'s Coins | Ticket System' });
+                
+                await transcriptChannel.send({ 
+                    embeds: [transcriptEmbed], 
+                    files: [attachment] 
+                });
+                
+                console.log(`Transcript sent via !close command for ticket ${message.channel.name}`);
+            } else {
+                console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
+            }
+        } catch (error) {
+            console.error('Error generating transcript via !close:', error);
+        }
+        
+        // Remove from active tickets
+        for (const [userId, channelId] of activeTickets) {
+            if (channelId === message.channel.id) {
+                activeTickets.delete(userId);
+                break;
+            }
+        }
+        
+        // Clean up message tracking
+        ticketMessages.delete(message.channel.id);
+
+        setTimeout(async () => {
+            try {
+                await message.channel.delete();
+            } catch (error) {
+                console.error('Error deleting channel via !close:', error);
+            }
+        }, 5000);
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !close message:', error);
         }
     }
 });
