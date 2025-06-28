@@ -1,7 +1,7 @@
 // Load environment variables from .env file
 require('dotenv').config();
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 
 // Configuration using environment variables (safer than hardcoding)
 const CONFIG = {
@@ -70,6 +70,82 @@ client.on('messageCreate', async (message) => {
     
     if (message.author.bot) return;
     
+    // Check if user has staff role for most commands
+    const isStaff = message.member && message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
+    
+    // !crypto - Available to everyone
+    if (message.content === '!crypto') {
+        const cryptoEmbed = new EmbedBuilder()
+            .setTitle("🪙 Cryptocurrency Wallet Addresses")
+            .setColor(0xf39c12)
+            .setDescription("**Send payments to the addresses below:**")
+            .addFields(
+                {
+                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
+                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
+                    inline: false
+                },
+                {
+                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
+                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
+                    inline: false
+                },
+                {
+                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
+                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
+                    inline: false
+                },
+                {
+                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
+                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
+
+        const cryptoButtons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('copy_ltc')
+                    .setLabel('Copy LTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494812269412372'),
+                new ButtonBuilder()
+                    .setCustomId('copy_btc')
+                    .setLabel('Copy BTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494854497669242'),
+                new ButtonBuilder()
+                    .setCustomId('copy_eth')
+                    .setLabel('Copy ETH')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494868531675226'),
+                new ButtonBuilder()
+                    .setCustomId('copy_usdt')
+                    .setLabel('Copy USDT')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494839855218798')
+            );
+
+        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+        return;
+    }
+    
+    // All other commands - Staff only
+    if (!isStaff) {
+        // If not staff and they try any other ! command, ignore it
+        if (message.content.startsWith('!')) {
+            return;
+        }
+    }
+    
+    // Staff-only commands below
     if (message.content === '!info') {
         const embed = new EmbedBuilder()
             .setTitle("David's Coins")
@@ -106,7 +182,6 @@ client.on('messageCreate', async (message) => {
 
         await message.reply({ embeds: [embed], components: [row] });
         
-        // Delete the user's command message
         try {
             await message.delete();
         } catch (error) {
@@ -271,68 +346,6 @@ client.on('messageCreate', async (message) => {
         }
     }
     
-    if (message.content === '!crypto') {
-        const cryptoEmbed = new EmbedBuilder()
-            .setTitle("🪙 Cryptocurrency Wallet Addresses")
-            .setColor(0xf39c12)
-            .setDescription("**Send payments to the addresses below:**")
-            .addFields(
-                {
-                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
-                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
-                    inline: false
-                },
-                {
-                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
-                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
-                    inline: false
-                },
-                {
-                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
-                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
-                    inline: false
-                },
-                {
-                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
-                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
-
-        const cryptoButtons = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('copy_ltc')
-                    .setLabel('Copy LTC')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494812269412372'),
-                new ButtonBuilder()
-                    .setCustomId('copy_btc')
-                    .setLabel('Copy BTC')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494854497669242'),
-                new ButtonBuilder()
-                    .setCustomId('copy_eth')
-                    .setLabel('Copy ETH')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494868531675226'),
-                new ButtonBuilder()
-                    .setCustomId('copy_usdt')
-                    .setLabel('Copy USDT')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494839855218798')
-            );
-
-        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
     if (message.content === '!help') {
         const helpEmbed = new EmbedBuilder()
             .setTitle("📚 Available Commands")
@@ -395,11 +408,6 @@ client.on('messageCreate', async (message) => {
         // Check if this is a ticket channel
         if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
             return await message.reply('This command can only be used in ticket channels.');
-        }
-        
-        // Check if user has staff role
-        if (!message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
-            return await message.reply('Only staff members can close tickets.');
         }
         
         await message.reply('Generating transcript and closing ticket in 5 seconds...');
@@ -846,10 +854,8 @@ client.on('interactionCreate', async (interaction) => {
                     userId: interaction.user.id
                 };
 
-                // Store ticket info in a map for later use
-                if (!ticketChannel.ticketInfo) {
-                    ticketChannel.ticketInfo = ticketInfo;
-                }
+                // Store ticket info in the channel for later use
+                ticketChannel.ticketInfo = ticketInfo;
 
                 // Close ticket button
                 const closeRow = new ActionRowBuilder()
