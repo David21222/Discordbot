@@ -44,8 +44,8 @@ let PRICES = {
     sell: 0.012         // Price per million for selling
 };
 
-// Store info message IDs to update them when prices change
-const infoMessages = new Set();
+// Store info messages with channel info to delete and repost them
+const infoMessages = new Map(); // messageId -> { channelId, messageId }
 
 // Bot ready event
 client.once('ready', async () => {
@@ -192,8 +192,11 @@ client.on('messageCreate', async (message) => {
 
         const infoMessage = await message.reply({ embeds: [embed], components: [row] });
         
-        // Store this message ID to update it later when prices change
-        infoMessages.add(infoMessage.id);
+        // Store this message info to delete and repost it later when prices change
+        infoMessages.set(infoMessage.id, {
+            channelId: message.channel.id,
+            messageId: infoMessage.id
+        });
         
         try {
             await message.delete();
