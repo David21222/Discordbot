@@ -37,6 +37,16 @@ const client = new Client({
 const activeTickets = new Map();
 const ticketMessages = new Map(); // Store messages for each ticket
 
+// Dynamic pricing system
+let PRICES = {
+    buyUnder1B: 0.045,  // Price per million for under 1B
+    buyOver1B: 0.04,    // Price per million for 1B+
+    sell: 0.012         // Price per million for selling
+};
+
+// Store info message IDs to update them when prices change
+const infoMessages = new Set();
+
 // Bot ready event
 client.once('ready', async () => {
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
@@ -153,12 +163,12 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 {
                     name: "Coins Buy Prices:",
-                    value: "• 0.045/m for 300m-1b ($45 per 1B)\n• 0.04/m for 1b+ ($40 per 1B)",
+                    value: `• ${PRICES.buyUnder1B}/m for 300m-1b (${PRICES.buyUnder1B * 1000} per 1B)\n• ${PRICES.buyOver1B}/m for 1b+ (${PRICES.buyOver1B * 1000} per 1B)`,
                     inline: false
                 },
                 {
                     name: "Coins Sell Prices:",
-                    value: "• 0.012/m for 1b+ ($12 per 1B)",
+                    value: `• ${PRICES.sell}/m for 1b+ (${PRICES.sell * 1000} per 1B)`,
                     inline: false
                 },
                 {
@@ -180,7 +190,10 @@ client.on('messageCreate', async (message) => {
                     .setStyle(ButtonStyle.Secondary)
             );
 
-        await message.reply({ embeds: [embed], components: [row] });
+        const infoMessage = await message.reply({ embeds: [embed], components: [row] });
+        
+        // Store this message ID to update it later when prices change
+        infoMessages.add(infoMessage.id);
         
         try {
             await message.delete();
@@ -391,6 +404,11 @@ client.on('messageCreate', async (message) => {
                     name: "🔒 **!close**",
                     value: "Close a ticket (staff only, must be used in ticket channels)",
                     inline: false
+                },
+                {
+                    name: "💰 **!price**",
+                    value: "Update coin prices (staff only, updates all existing price displays)",
+                    inline: false
                 }
             )
             .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
@@ -476,6 +494,62 @@ client.on('messageCreate', async (message) => {
             await message.delete();
         } catch (error) {
             console.error('Could not delete !close message:', error);
+        }
+    }
+    
+    if (message.content === '!price') {
+        const modal = new ModalBuilder()
+            .setCustomId('price_modal')
+            .setTitle('Update Coin Prices');
+
+        const buyUnder1BInput = new TextInputBuilder()
+            .setCustomId('buy_under_1b_input')
+            .setLabel('Buy Price Under 1B (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyUnder1B.toString())
+            .setPlaceholder('e.g., 0.045');
+
+        const buyOver1BInput = new TextInputBuilder()
+            .setCustomId('buy_over_1b_input')
+            .setLabel('Buy Price 1B+ (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyOver1B.toString())
+            .setPlaceholder('e.g., 0.04');
+
+        const sellInput = new TextInputBuilder()
+            .setCustomId('sell_input')
+            .setLabel('Sell Price (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.sell.toString())
+            .setPlaceholder('e.g., 0.012');
+
+        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+        
+        // Create a temporary interaction to show the modal
+        const tempMessage = await message.reply('Opening price update modal...');
+        
+        // Since we can't directly show modal from message, we'll create an interaction
+        const buttonRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('open_price_modal')
+                    .setLabel('💰 Update Prices')
+                    .setStyle(ButtonStyle.Primary)
+            );
+            
+        await tempMessage.edit({ content: 'Click the button below to update prices:', components: [buttonRow] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !price message:', error);
         }
     }
 });
@@ -682,11 +756,119 @@ async function generateTranscript(channelId, channelName, ticketInfo = {}) {
     return transcript;
 }
 
+// Function to update all existing info messages with new prices
+async function updateAllInfoMessages(guild) {
+    const newEmbed = new EmbedBuilder()
+        .setTitle("David's Coins")
+        .setColor(0x5865F2)
+        .addFields(
+            {
+                name: "Coins Buy Prices:",
+                value: `• ${PRICES.buyUnder1B}/m for 300m-1b (${PRICES.buyUnder1B * 1000} per 1B)\n• ${PRICES.buyOver1B}/m for 1b+ (${PRICES.buyOver1B * 1000} per 1B)`,
+                inline: false
+            },
+            {
+                name: "Coins Sell Prices:",
+                value: `• ${PRICES.sell}/m for 1b+ (${PRICES.sell * 1000} per 1B)`,
+                inline: false
+            },
+            {
+                name: "Payment Methods:",
+                value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
+                inline: false
+            }
+        );
+
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId('buy_coins')
+                .setLabel('Buy')
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId('sell_coins')
+                .setLabel('Sell')
+                .setStyle(ButtonStyle.Secondary)
+        );
+
+    // Update all stored info messages
+    for (const messageId of infoMessages) {
+        try {
+            // Search through all channels to find the message
+            for (const channel of guild.channels.cache.values()) {
+                if (channel.isTextBased()) {
+                    try {
+                        const message = await channel.messages.fetch(messageId);
+                        if (message && message.author.id === guild.members.me.id) {
+                            await message.edit({ embeds: [newEmbed], components: [row] });
+                            console.log(`Updated info message ${messageId} in channel ${channel.name}`);
+                        }
+                    } catch (error) {
+                        // Message not found in this channel, continue
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error updating message ${messageId}:`, error);
+            // Remove invalid message ID
+            infoMessages.delete(messageId);
+        }
+    }
+}
+
 // Interaction handler
 client.on('interactionCreate', async (interaction) => {
     try {
         // Handle button interactions
         if (interaction.isButton()) {
+            // Handle price modal button
+            if (interaction.customId === 'open_price_modal') {
+                // Check if user has staff role
+                if (!interaction.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+                    return await interaction.reply({
+                        content: 'Only staff members can update prices.',
+                        ephemeral: true
+                    });
+                }
+                
+                const modal = new ModalBuilder()
+                    .setCustomId('price_modal')
+                    .setTitle('Update Coin Prices');
+
+                const buyUnder1BInput = new TextInputBuilder()
+                    .setCustomId('buy_under_1b_input')
+                    .setLabel('Buy Price Under 1B (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(PRICES.buyUnder1B.toString())
+                    .setPlaceholder('e.g., 0.045');
+
+                const buyOver1BInput = new TextInputBuilder()
+                    .setCustomId('buy_over_1b_input')
+                    .setLabel('Buy Price 1B+ (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(PRICES.buyOver1B.toString())
+                    .setPlaceholder('e.g., 0.04');
+
+                const sellInput = new TextInputBuilder()
+                    .setCustomId('sell_input')
+                    .setLabel('Sell Price (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(PRICES.sell.toString())
+                    .setPlaceholder('e.g., 0.012');
+
+                const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+                const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+                const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+                modal.addComponents(firstRow, secondRow, thirdRow);
+                
+                await interaction.showModal(modal);
+                return;
+            }
+            
             // Handle crypto copy buttons
             if (interaction.customId.startsWith('copy_')) {
                 const walletAddresses = {
@@ -754,6 +936,51 @@ client.on('interactionCreate', async (interaction) => {
 
         // Handle modal submissions
         if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'price_modal') {
+                const newBuyUnder1B = parseFloat(interaction.fields.getTextInputValue('buy_under_1b_input'));
+                const newBuyOver1B = parseFloat(interaction.fields.getTextInputValue('buy_over_1b_input'));
+                const newSell = parseFloat(interaction.fields.getTextInputValue('sell_input'));
+                
+                // Validate inputs
+                if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
+                    return await interaction.reply({
+                        content: '❌ Invalid price format. Please enter valid numbers (e.g., 0.045)',
+                        ephemeral: true
+                    });
+                }
+                
+                if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
+                    return await interaction.reply({
+                        content: '❌ Prices must be greater than 0.',
+                        ephemeral: true
+                    });
+                }
+                
+                // Update prices
+                PRICES.buyUnder1B = newBuyUnder1B;
+                PRICES.buyOver1B = newBuyOver1B;
+                PRICES.sell = newSell;
+                
+                // Update all existing info messages
+                await updateAllInfoMessages(interaction.guild);
+                
+                // Confirmation message
+                const confirmEmbed = new EmbedBuilder()
+                    .setTitle('✅ Prices Updated Successfully')
+                    .setColor(0x00ff00)
+                    .addFields(
+                        { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
+                        { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
+                        { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
+                    )
+                    .setFooter({ text: 'All existing price displays have been updated automatically' });
+                    
+                await interaction.reply({ embeds: [confirmEmbed], ephemeral: true });
+                
+                console.log(`Prices updated by ${interaction.user.username}: Buy<1B: ${PRICES.buyUnder1B}, Buy1B+: ${PRICES.buyOver1B}, Sell: ${PRICES.sell}`);
+                return;
+            }
+            
             if (interaction.customId === 'buy_modal' || interaction.customId === 'sell_modal') {
                 const isBuying = interaction.customId === 'buy_modal';
                 const ign = interaction.fields.getTextInputValue('ign_input');
@@ -808,15 +1035,15 @@ client.on('interactionCreate', async (interaction) => {
                     
                     if (amount.toLowerCase().includes('b')) {
                         const amountInM = numericAmount * 1000;
-                        rate = 0.04;
+                        rate = PRICES.buyOver1B;
                         totalPrice = amountInM * rate;
                     } else {
                         if (numericAmount >= 1000) {
-                            rate = 0.04;
+                            rate = PRICES.buyOver1B;
                         } else if (numericAmount >= 300) {
-                            rate = 0.045;
+                            rate = PRICES.buyUnder1B;
                         } else {
-                            rate = 0.045;
+                            rate = PRICES.buyUnder1B;
                         }
                         totalPrice = numericAmount * rate;
                     }
@@ -824,7 +1051,7 @@ client.on('interactionCreate', async (interaction) => {
                     const cleanAmount = amount.toLowerCase().replace(/[^0-9.]/g, '');
                     const numericAmount = parseFloat(cleanAmount);
                     const amountInM = amount.toLowerCase().includes('b') ? numericAmount * 1000 : numericAmount;
-                    rate = 0.012;
+                    rate = PRICES.sell;
                     totalPrice = amountInM * rate;
                 }
 
