@@ -55,13 +55,13 @@ client.once('ready', async () => {
 
 // Message handler to track ticket messages
 client.on('messageCreate', async (message) => {
-    // Track messages in ticket channels
+    // Track ALL messages in ticket channels (before bot check)
     if (message.channel.name && message.channel.name.startsWith('ticket-')) {
         if (!ticketMessages.has(message.channel.id)) {
             ticketMessages.set(message.channel.id, []);
         }
         
-        // Store message data
+        // Store message data for both bot and user messages
         const messageData = {
             timestamp: new Date(),
             author: message.author.username,
@@ -76,6 +76,7 @@ client.on('messageCreate', async (message) => {
         };
         
         ticketMessages.get(message.channel.id).push(messageData);
+        console.log(`Tracked message in ${message.channel.name}: ${message.author.username}: ${message.content.substring(0, 50)}...`);
     }
     
     if (message.author.bot) return;
@@ -706,7 +707,8 @@ async function generateTranscript(channelId, channelName, ticketInfo = {}) {
     
     let transcript = `TICKET TRANSCRIPT - ${channelName}\n`;
     transcript += `Created: ${new Date().toLocaleString()}\n`;
-    transcript += `Ticket Channel ID: ${channelId}\n\n`;
+    transcript += `Ticket Channel ID: ${channelId}\n`;
+    transcript += `Total Messages: ${messages.length}\n\n`;
     
     // Add ticket info if available
     if (ticketInfo.ign) {
@@ -718,43 +720,55 @@ async function generateTranscript(channelId, channelName, ticketInfo = {}) {
     if (ticketInfo.cost) {
         transcript += `Cost: ${ticketInfo.cost}\n`;
     }
+    if (ticketInfo.user) {
+        transcript += `Customer: ${ticketInfo.user}\n`;
+    }
     
     transcript += `\n--- CONVERSATION ---\n\n`;
     
-    // Add all messages
-    for (const msg of messages) {
-        const time = msg.timestamp.toLocaleTimeString();
-        const author = msg.isBot ? `${msg.author} [BOT]` : msg.author;
-        
-        transcript += `[${time}] ${author}: `;
-        
-        if (msg.content) {
-            transcript += `${msg.content}\n`;
-        }
-        
-        // Add embed information
-        if (msg.embeds && msg.embeds.length > 0) {
-            for (const embed of msg.embeds) {
-                if (embed.title) {
-                    transcript += `    [EMBED] Title: ${embed.title}\n`;
-                }
-                if (embed.description) {
-                    transcript += `    [EMBED] Description: ${embed.description}\n`;
-                }
-                if (embed.fields && embed.fields.length > 0) {
-                    for (const field of embed.fields) {
-                        transcript += `    [EMBED] ${field.name}: ${field.value}\n`;
+    if (messages.length === 0) {
+        transcript += `[NO MESSAGES RECORDED]\n`;
+        transcript += `Note: Message tracking may have failed or no messages were sent.\n\n`;
+    } else {
+        // Add all messages
+        for (const msg of messages) {
+            const time = msg.timestamp.toLocaleTimeString();
+            const author = msg.isBot ? `${msg.author} [BOT]` : msg.author;
+            
+            transcript += `[${time}] ${author}: `;
+            
+            if (msg.content) {
+                transcript += `${msg.content}\n`;
+            } else {
+                transcript += `[No text content]\n`;
+            }
+            
+            // Add embed information
+            if (msg.embeds && msg.embeds.length > 0) {
+                for (const embed of msg.embeds) {
+                    if (embed.title) {
+                        transcript += `    [EMBED] Title: ${embed.title}\n`;
+                    }
+                    if (embed.description) {
+                        transcript += `    [EMBED] Description: ${embed.description}\n`;
+                    }
+                    if (embed.fields && embed.fields.length > 0) {
+                        for (const field of embed.fields) {
+                            transcript += `    [EMBED] ${field.name}: ${field.value}\n`;
+                        }
                     }
                 }
             }
+            
+            transcript += `\n`;
         }
-        
-        transcript += `\n`;
     }
     
     transcript += `--- END TRANSCRIPT ---\n`;
     transcript += `Transcript generated on: ${new Date().toLocaleString()}\n`;
     transcript += `David's Coins | Ticket System`;
+    
+    console.log(`Generated transcript for ${channelName} with ${messages.length} messages`);
     
     return transcript;
 }
