@@ -30,8 +30,10 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.GuildMembers
-    ]
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages  // Added for DM support
+    ],
+    partials: ['CHANNEL']  // Required for DMs
 });
 
 // Track active tickets to prevent duplicates and store messages
