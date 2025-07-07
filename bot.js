@@ -52,6 +52,7 @@ const infoMessages = new Map(); // messageId -> { channelId, messageId }
 client.once('ready', async () => {
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
     console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
+    await deployCommands();
 });
 
 // Message handler to track ticket messages
