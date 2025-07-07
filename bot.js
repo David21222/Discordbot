@@ -12,7 +12,7 @@ const CONFIG = {
     STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
     VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
     TRANSCRIPT_CHANNEL_ID: '1387582544278585487',
-    OWNER_USER_ID: 'YOUR_USER_ID_HERE' // Replace with your Discord user ID
+    OWNER_USER_ID: '752590954388783196' // Your Discord user ID
 };
 
 // Check if all required variables are loaded
