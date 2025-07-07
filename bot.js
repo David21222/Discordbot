@@ -11,7 +11,8 @@ const CONFIG = {
     TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
     STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
     VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
-    TRANSCRIPT_CHANNEL_ID: '1387582544278585487'
+    TRANSCRIPT_CHANNEL_ID: '1387582544278585487',
+    OWNER_USER_ID: 'YOUR_USER_ID_HERE' // Replace with your Discord user ID
 };
 
 // Check if all required variables are loaded
@@ -81,6 +82,127 @@ client.on('messageCreate', async (message) => {
     
     if (message.author.bot) return;
     
+    // Handle DM commands (only for bot owner)
+    if (message.channel.type === 1) { // DM channel
+        if (message.author.id !== CONFIG.OWNER_USER_ID) {
+            return await message.reply('❌ This bot only responds to its owner in DMs.');
+        }
+        
+        // DM-specific commands for owner
+        if (message.content === '!dmhelp') {
+            const dmHelpEmbed = new EmbedBuilder()
+                .setTitle('🔧 Bot Owner DM Commands')
+                .setColor(0x7289da)
+                .addFields(
+                    { name: '!servers', value: 'List all servers the bot is in', inline: false },
+                    { name: '!stats', value: 'Show bot statistics', inline: false },
+                    { name: '!prices', value: 'Show current coin prices', inline: false },
+                    { name: '!setprice <under1b> <over1b> <sell>', value: 'Update prices via DM', inline: false },
+                    { name: '!dmhelp', value: 'Show this help menu', inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Owner Commands' });
+            
+            return await message.reply({ embeds: [dmHelpEmbed] });
+        }
+        
+        if (message.content === '!servers') {
+            const servers = client.guilds.cache.map(guild => 
+                `**${guild.name}** (${guild.id}) - ${guild.memberCount} members`
+            ).join('\n') || 'No servers';
+            
+            const serverEmbed = new EmbedBuilder()
+                .setTitle('🌐 Bot Servers')
+                .setDescription(servers)
+                .setColor(0x00ff00)
+                .setFooter({ text: `Total: ${client.guilds.cache.size} servers` });
+            
+            return await message.reply({ embeds: [serverEmbed] });
+        }
+        
+        if (message.content === '!stats') {
+            const uptime = process.uptime();
+            const days = Math.floor(uptime / 86400);
+            const hours = Math.floor(uptime / 3600) % 24;
+            const minutes = Math.floor(uptime / 60) % 60;
+            
+            const statsEmbed = new EmbedBuilder()
+                .setTitle('📊 Bot Statistics')
+                .setColor(0x5865f2)
+                .addFields(
+                    { name: 'Servers', value: client.guilds.cache.size.toString(), inline: true },
+                    { name: 'Active Tickets', value: activeTickets.size.toString(), inline: true },
+                    { name: 'Tracked Messages', value: Array.from(ticketMessages.values()).reduce((total, msgs) => total + msgs.length, 0).toString(), inline: true },
+                    { name: 'Uptime', value: `${days}d ${hours}h ${minutes}m`, inline: true },
+                    { name: 'Memory Usage', value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, inline: true },
+                    { name: 'Ping', value: `${client.ws.ping}ms`, inline: true }
+                )
+                .setFooter({ text: 'David\'s Coins | Bot Stats' });
+            
+            return await message.reply({ embeds: [statsEmbed] });
+        }
+        
+        if (message.content === '!prices') {
+            const pricesEmbed = new EmbedBuilder()
+                .setTitle('💰 Current Coin Prices')
+                .setColor(0xf39c12)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: false },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: false },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Current Pricing' });
+            
+            return await message.reply({ embeds: [pricesEmbed] });
+        }
+        
+        if (message.content.startsWith('!setprice ')) {
+            const args = message.content.split(' ').slice(1);
+            if (args.length !== 3) {
+                return await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.045 0.04 0.012`');
+            }
+            
+            const [newBuyUnder1B, newBuyOver1B, newSell] = args.map(parseFloat);
+            
+            if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
+                return await message.reply('❌ All prices must be valid numbers.');
+            }
+            
+            if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
+                return await message.reply('❌ All prices must be greater than 0.');
+            }
+            
+            // Update prices
+            PRICES.buyUnder1B = newBuyUnder1B;
+            PRICES.buyOver1B = newBuyOver1B;
+            PRICES.sell = newSell;
+            
+            // Update all info messages in all servers
+            for (const guild of client.guilds.cache.values()) {
+                try {
+                    await updateAllInfoMessages(guild);
+                } catch (error) {
+                    console.error(`Error updating prices in guild ${guild.name}:`, error);
+                }
+            }
+            
+            const confirmEmbed = new EmbedBuilder()
+                .setTitle('✅ Prices Updated Successfully')
+                .setColor(0x00ff00)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
+                )
+                .setFooter({ text: 'All servers have been updated automatically' });
+            
+            return await message.reply({ embeds: [confirmEmbed] });
+        }
+        
+        // If no DM command matched, show help
+        return await message.reply('❓ Unknown command. Use `!dmhelp` to see available commands.');
+    }
+    
+    // Server commands below (existing code)
     // Check if user has staff role for most commands
     const isStaff = message.member && message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
     
