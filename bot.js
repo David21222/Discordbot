@@ -1,638 +1,4 @@
-// Load environment variables from .env file
-require('dotenv').config();
-
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
-
-// Configuration using environment variables (safer than hardcoding)
-const CONFIG = {
-    TOKEN: process.env.DISCORD_TOKEN,
-    CLIENT_ID: process.env.CLIENT_ID,
-    GUILD_ID: process.env.GUILD_ID,
-    TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
-    STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
-    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
-    TRANSCRIPT_CHANNEL_ID: '1387582544278585487',
-    OWNER_USER_ID: '752590954388783196' // Your Discord user ID
-};
-
-// Check if all required variables are loaded
-console.log('🔍 Checking environment variables...');
-if (!CONFIG.TOKEN) {
-    console.error('❌ DISCORD_TOKEN is missing!');
-    process.exit(1);
-}
-console.log('✅ Environment variables loaded successfully');
-
-// Create Discord client
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.DirectMessages  // Added for DM support
-    ],
-    partials: ['CHANNEL']  // Required for DMs
-});
-
-// Track active tickets to prevent duplicates and store messages
-const activeTickets = new Map();
-const ticketMessages = new Map(); // Store messages for each ticket
-
-// Dynamic pricing system
-let PRICES = {
-    buyUnder1B: 0.045,  // Price per million for under 1B
-    buyOver1B: 0.04,    // Price per million for 1B+
-    sell: 0.012         // Price per million for selling
-};
-
-// Store info messages with channel info to delete and repost them
-const infoMessages = new Map(); // messageId -> { channelId, messageId }
-
-// Bot ready event
-client.once('ready', async () => {
-    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
-    console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
-    await deployCommands();
-});
-
-// Message handler to track ticket messages
-client.on('messageCreate', async (message) => {
-    // Track ALL messages in ticket channels (before bot check)
-    if (message.channel.name && message.channel.name.startsWith('ticket-')) {
-        if (!ticketMessages.has(message.channel.id)) {
-            ticketMessages.set(message.channel.id, []);
-        }
-        
-        // Store message data for both bot and user messages
-        const messageData = {
-            timestamp: new Date(),
-            author: message.author.username,
-            authorId: message.author.id,
-            content: message.content,
-            embeds: message.embeds.map(embed => ({
-                title: embed.title,
-                description: embed.description,
-                fields: embed.fields
-            })),
-            isBot: message.author.bot
-        };
-        
-        ticketMessages.get(message.channel.id).push(messageData);
-        console.log(`Tracked message in ${message.channel.name}: ${message.author.username}: ${message.content.substring(0, 50)}...`);
-    }
-    
-    if (message.author.bot) return;
-    
-    // Handle DM commands (only for bot owner)
-    if (message.channel.type === 1) { // DM channel
-        if (message.author.id !== CONFIG.OWNER_USER_ID) {
-            return await message.reply('❌ This bot only responds to its owner in DMs.');
-        }
-        
-        // DM-specific commands for owner
-        if (message.content === '!dmhelp') {
-            const dmHelpEmbed = new EmbedBuilder()
-                .setTitle('🔧 Bot Owner DM Commands')
-                .setColor(0x7289da)
-                .addFields(
-                    { name: '!servers', value: 'List all servers the bot is in', inline: false },
-                    { name: '!stats', value: 'Show bot statistics', inline: false },
-                    { name: '!prices', value: 'Show current coin prices', inline: false },
-                    { name: '!setprice <under1b> <over1b> <sell>', value: 'Update prices via DM', inline: false },
-                    { name: '!dmhelp', value: 'Show this help menu', inline: false }
-                )
-                .setFooter({ text: 'David\'s Coins | Owner Commands' });
-            
-            return await message.reply({ embeds: [dmHelpEmbed] });
-        }
-        
-        if (message.content === '!servers') {
-            const servers = client.guilds.cache.map(guild => 
-                `**${guild.name}** (${guild.id}) - ${guild.memberCount} members`
-            ).join('\n') || 'No servers';
-            
-            const serverEmbed = new EmbedBuilder()
-                .setTitle('🌐 Bot Servers')
-                .setDescription(servers)
-                .setColor(0x00ff00)
-                .setFooter({ text: `Total: ${client.guilds.cache.size} servers` });
-            
-            return await message.reply({ embeds: [serverEmbed] });
-        }
-        
-        if (message.content === '!stats') {
-            const uptime = process.uptime();
-            const days = Math.floor(uptime / 86400);
-            const hours = Math.floor(uptime / 3600) % 24;
-            const minutes = Math.floor(uptime / 60) % 60;
-            
-            const statsEmbed = new EmbedBuilder()
-                .setTitle('📊 Bot Statistics')
-                .setColor(0x5865f2)
-                .addFields(
-                    { name: 'Servers', value: client.guilds.cache.size.toString(), inline: true },
-                    { name: 'Active Tickets', value: activeTickets.size.toString(), inline: true },
-                    { name: 'Tracked Messages', value: Array.from(ticketMessages.values()).reduce((total, msgs) => total + msgs.length, 0).toString(), inline: true },
-                    { name: 'Uptime', value: `${days}d ${hours}h ${minutes}m`, inline: true },
-                    { name: 'Memory Usage', value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, inline: true },
-                    { name: 'Ping', value: `${client.ws.ping}ms`, inline: true }
-                )
-                .setFooter({ text: 'David\'s Coins | Bot Stats' });
-            
-            return await message.reply({ embeds: [statsEmbed] });
-        }
-        
-        if (message.content === '!prices') {
-            const pricesEmbed = new EmbedBuilder()
-                .setTitle('💰 Current Coin Prices')
-                .setColor(0xf39c12)
-                .addFields(
-                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: false },
-                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: false },
-                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: false }
-                )
-                .setFooter({ text: 'David\'s Coins | Current Pricing' });
-            
-            return await message.reply({ embeds: [pricesEmbed] });
-        }
-        
-        if (message.content.startsWith('!setprice ')) {
-            const args = message.content.split(' ').slice(1);
-            if (args.length !== 3) {
-                return await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.045 0.04 0.012`');
-            }
-            
-            const [newBuyUnder1B, newBuyOver1B, newSell] = args.map(parseFloat);
-            
-            if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
-                return await message.reply('❌ All prices must be valid numbers.');
-            }
-            
-            if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
-                return await message.reply('❌ All prices must be greater than 0.');
-            }
-            
-            // Update prices
-            PRICES.buyUnder1B = newBuyUnder1B;
-            PRICES.buyOver1B = newBuyOver1B;
-            PRICES.sell = newSell;
-            
-            // Update all info messages in all servers
-            for (const guild of client.guilds.cache.values()) {
-                try {
-                    await updateAllInfoMessages(guild);
-                } catch (error) {
-                    console.error(`Error updating prices in guild ${guild.name}:`, error);
-                }
-            }
-            
-            const confirmEmbed = new EmbedBuilder()
-                .setTitle('✅ Prices Updated Successfully')
-                .setColor(0x00ff00)
-                .addFields(
-                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
-                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
-                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
-                )
-                .setFooter({ text: 'All servers have been updated automatically' });
-            
-            return await message.reply({ embeds: [confirmEmbed] });
-        }
-        
-        // If no DM command matched, show help
-        return await message.reply('❓ Unknown command. Use `!dmhelp` to see available commands.');
-    }
-    
-    // Server commands below (existing code)
-    // Check if user is the bot owner
-    const isOwner = message.author.id === CONFIG.OWNER_USER_ID;
-    
-    // !crypto - Available to everyone
-    if (message.content === '!crypto') {
-        const cryptoEmbed = new EmbedBuilder()
-            .setTitle("🪙 Cryptocurrency Wallet Addresses")
-            .setColor(0xf39c12)
-            .setDescription("**Send payments to the addresses below:**")
-            .addFields(
-                {
-                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
-                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
-                    inline: false
-                },
-                {
-                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
-                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
-                    inline: false
-                },
-                {
-                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
-                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
-                    inline: false
-                },
-                {
-                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
-                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
-
-        const cryptoButtons = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('copy_ltc')
-                    .setLabel('Copy LTC')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494812269412372'),
-                new ButtonBuilder()
-                    .setCustomId('copy_btc')
-                    .setLabel('Copy BTC')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494854497669242'),
-                new ButtonBuilder()
-                    .setCustomId('copy_eth')
-                    .setLabel('Copy ETH')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494868531675226'),
-                new ButtonBuilder()
-                    .setCustomId('copy_usdt')
-                    .setLabel('Copy USDT')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('1387494839855218798')
-            );
-
-        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-        return;
-    }
-    
-    // !help - Available to everyone
-    if (message.content === '!help') {
-        const helpEmbed = new EmbedBuilder()
-            .setTitle("📚 Available Commands")
-            .setColor(0x7289da)
-            .setDescription("Here are all the available commands for **David's Coins**:")
-            .addFields(
-                {
-                    name: "🪙 **!crypto**",
-                    value: "Display cryptocurrency wallet addresses for payments",
-                    inline: false
-                },
-                {
-                    name: "📚 **!help**",
-                    value: "Show this help menu with all available commands",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
-
-        await message.reply({ embeds: [helpEmbed] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-        return;
-    }
-    
-    // Owner-only commands below
-    if (!isOwner) {
-        // If not owner and they try any other ! command, ignore it
-        if (message.content.startsWith('!')) {
-            return;
-        }
-    }
-    
-    // Owner-only commands
-    if (message.content === '!info') {
-        const embed = new EmbedBuilder()
-            .setTitle("David's Coins")
-            .setColor(0x5865F2)
-            .addFields(
-                {
-                    name: "Coins Buy Prices:",
-                    value: `• ${PRICES.buyUnder1B}/m for 300m-1b (${PRICES.buyUnder1B * 1000} per 1B)\n• ${PRICES.buyOver1B}/m for 1b+ (${PRICES.buyOver1B * 1000} per 1B)`,
-                    inline: false
-                },
-                {
-                    name: "Coins Sell Prices:",
-                    value: `• ${PRICES.sell}/m for 1b+ (${PRICES.sell * 1000} per 1B)`,
-                    inline: false
-                },
-                {
-                    name: "Payment Methods:",
-                    value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
-                    inline: false
-                }
-            );
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('buy_coins')
-                    .setLabel('Buy')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('sell_coins')
-                    .setLabel('Sell')
-                    .setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder()
-                    .setCustomId('calculate_coins')
-                    .setLabel('Calculate')
-                    .setStyle(ButtonStyle.Success)
-            );
-
-        const infoMessage = await message.reply({ embeds: [embed], components: [row] });
-        
-        // Store this message info to delete and repost it later when prices change
-        infoMessages.set(infoMessage.id, {
-            channelId: message.channel.id,
-            messageId: infoMessage.id
-        });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!rules') {
-        const rulesEmbed = new EmbedBuilder()
-            .setTitle("📋 Server Rules")
-            .setColor(0xff6b6b)
-            .setDescription("Please follow these rules to ensure a safe and professional trading environment:")
-            .addFields(
-                {
-                    name: "**1. Have basic human decency**",
-                    value: "Treat all members with respect and courtesy.",
-                    inline: false
-                },
-                {
-                    name: "**2. Don't advertise in chat or in DMs**",
-                    value: "No promotion of other services or unsolicited messages.",
-                    inline: false
-                },
-                {
-                    name: "**3. Don't attempt to scam**",
-                    value: "Any fraudulent activity will result in immediate ban.",
-                    inline: false
-                },
-                {
-                    name: "**4. Don't spam the ticket system**",
-                    value: "Only create tickets for legitimate transactions.",
-                    inline: false
-                },
-                {
-                    name: "**5. Don't leak other players' IGNs**",
-                    value: "Respect privacy and keep player information confidential.",
-                    inline: false
-                },
-                {
-                    name: "**6. Communicate through English**",
-                    value: "All communication must be in English for clarity.",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "Violation of these rules may result in warnings, mutes, or permanent bans." });
-
-        await message.reply({ embeds: [rulesEmbed] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!tos') {
-        const tosEmbed = new EmbedBuilder()
-            .setTitle("📜 Terms of Service")
-            .setColor(0xffa500)
-            .setDescription("**Once you join David's Coins, you're automatically agreeing to the following terms:**")
-            .addFields(
-                {
-                    name: "1. No Refunds",
-                    value: "There are no refunds once the transaction has taken place.",
-                    inline: false
-                },
-                {
-                    name: "2. Chargeback Policy",
-                    value: "Any and all chargebacks will result in a permanent ban from our discord server.",
-                    inline: false
-                },
-                {
-                    name: "3. Payment Verification",
-                    value: "By purchasing any goods from us you acknowledge that the money is totally yours.",
-                    inline: false
-                },
-                {
-                    name: "4. Ban Rights",
-                    value: "We reserve the right to ban anyone from our discord server at any point in time for any reason, any paid for and not received items will get refunded.",
-                    inline: false
-                },
-                {
-                    name: "5. Service Refusal",
-                    value: "We reserve the right to refuse service to anyone at anytime.",
-                    inline: false
-                },
-                {
-                    name: "6. Server Protection",
-                    value: "If any damage is caused onto our server by you, we reserve the right to ban you without a refund.",
-                    inline: false
-                },
-                {
-                    name: "7. Terms Changes",
-                    value: "These terms are subject to change at any time without notice to the client.",
-                    inline: false
-                },
-                {
-                    name: "8. Price Changes",
-                    value: "We reserve the right to change the price of our products at any time we want.",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "By using our services, you agree to these terms and conditions." });
-
-        await message.reply({ embeds: [tosEmbed] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!verify') {
-        const verifyEmbed = new EmbedBuilder()
-            .setTitle("✅ Server Verification")
-            .setColor(0x00ff00)
-            .setDescription("Welcome to **David's Coins**!\n\nClick the ✅ reaction below to verify yourself and gain access to the server.");
-
-        const verifyMessage = await message.reply({ embeds: [verifyEmbed] });
-        
-        // Add checkmark reaction
-        await verifyMessage.react('✅');
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!payments') {
-        const paymentsEmbed = new EmbedBuilder()
-            .setTitle("💳 Payment Methods")
-            .setColor(0x2ecc71)
-            .setDescription("**David's Coins** accepts the following secure payment methods for all transactions:")
-            .addFields(
-                {
-                    name: "🪙 **Primary Cryptocurrencies**",
-                    value: "<:BTC:1387494854497669242> **Bitcoin (BTC)**\n<:ETH:1387494868531675226> **Ethereum (ETH)**\n<:LTC:1387494812269412372> **Litecoin (LTC)**\n<:USDT:1387494839855218798> **Tether (USDT)**",
-                    inline: false
-                },
-                {
-                    name: "⚡ **Why Cryptocurrency?**",
-                    value: "• **Fast transactions** - Nearly instant transfers\n• **Low fees** - Minimal processing costs\n• **Secure** - Blockchain-verified transactions\n• **Global** - Available worldwide 24/7",
-                    inline: false
-                },
-                {
-                    name: "**Additional Payment Options**",
-                    value: "We may accept other payment methods on a case-by-case basis. Please contact our staff through a ticket to discuss alternative payment arrangements.",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "David's Coins • Secure & Professional Trading • All transactions are final" });
-
-        await message.reply({ embeds: [paymentsEmbed] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!close') {
-        // Check if this is a ticket channel
-        if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
-            return await message.reply('This command can only be used in ticket channels.');
-        }
-        
-        await message.reply('Generating transcript and closing ticket in 5 seconds...');
-        
-        // Generate and send transcript
-        try {
-            const transcriptContent = await generateTranscript(
-                message.channel.id, 
-                message.channel.name,
-                message.channel.ticketInfo || {}
-            );
-            
-            // Create transcript file
-            const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
-            const attachment = new AttachmentBuilder(transcriptBuffer, { 
-                name: `transcript-${message.channel.name}.txt` 
-            });
-            
-            // Send transcript to transcript channel
-            const transcriptChannel = message.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
-            if (transcriptChannel) {
-                const transcriptEmbed = new EmbedBuilder()
-                    .setTitle('📄 Ticket Transcript')
-                    .setDescription(`Transcript for ${message.channel.name}`)
-                    .addFields(
-                        { name: 'Ticket Channel', value: message.channel.name, inline: true },
-                        { name: 'Closed By', value: message.author.username, inline: true },
-                        { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
-                    )
-                    .setColor(0x2ecc71)
-                    .setFooter({ text: 'David\'s Coins | Ticket System' });
-                
-                await transcriptChannel.send({ 
-                    embeds: [transcriptEmbed], 
-                    files: [attachment] 
-                });
-                
-                console.log(`Transcript sent via !close command for ticket ${message.channel.name}`);
-            } else {
-                console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
-            }
-        } catch (error) {
-            console.error('Error generating transcript via !close:', error);
-        }
-        
-        // Remove from active tickets
-        for (const [userId, channelId] of activeTickets) {
-            if (channelId === message.channel.id) {
-                activeTickets.delete(userId);
-                break;
-            }
-        }
-        
-        // Clean up message tracking
-        ticketMessages.delete(message.channel.id);
-
-        setTimeout(async () => {
-            try {
-                await message.channel.delete();
-            } catch (error) {
-                console.error('Error deleting channel via !close:', error);
-            }
-        }, 5000);
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete !close message:', error);
-        }
-    }
-    
-    if (message.content === '!price') {
-        const modal = new ModalBuilder()
-            .setCustomId('price_modal')
-            .setTitle('Update Coin Prices');
-
-        const buyUnder1BInput = new TextInputBuilder()
-            .setCustomId('buy_under_1b_input')
-            .setLabel('Buy Price Under 1B (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.buyUnder1B.toString())
-            .setPlaceholder('e.g., 0.045');
-
-        const buyOver1BInput = new TextInputBuilder()
-            .setCustomId('buy_over_1b_input')
-            .setLabel('Buy Price 1B+ (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.buyOver1B.toString())
-            .setPlaceholder('e.g., 0.04');
-
-        const sellInput = new TextInputBuilder()
-            .setCustomId('sell_input')
-            .setLabel('Sell Price (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.sell.toString())
-            .setPlaceholder('e.g., 0.012');
-
-        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
-        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
-        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
-
-        modal.addComponents(firstRow, secondRow, thirdRow);
-        
-        // Create a temporary interaction to show the modal
+// Create a temporary interaction to show the modal
         const tempMessage = await message.reply('Opening price update modal...');
         
         // Since we can't directly show modal from message, we'll create an interaction
@@ -940,10 +306,10 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.isButton()) {
             // Handle price modal button
             if (interaction.customId === 'open_price_modal') {
-                // Check if user is the bot owner
-                if (interaction.user.id !== CONFIG.OWNER_USER_ID) {
+                // Check if user has staff role
+                if (!interaction.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
                     return await interaction.reply({
-                        content: 'Only the bot owner can update prices.',
+                        content: 'Only staff members can update prices.',
                         ephemeral: true
                     });
                 }
@@ -1064,14 +430,684 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.customId === 'calculate_coins') {
                 const modal = new ModalBuilder()
                     .setCustomId('calculate_modal')
-                    .setTitle('💰 Calculate Coins');
+                    .setTitle('💰 Sell Coins');
 
                 const moneyInput = new TextInputBuilder()
                     .setCustomId('money_input')
                     .setLabel('How Much Money Do You Want To Spend?')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setPlaceholder('100)
+                    .setPlaceholder('100// Load environment variables from .env file
+require('dotenv').config();
+
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
+
+// Configuration using environment variables (safer than hardcoding)
+const CONFIG = {
+    TOKEN: process.env.DISCORD_TOKEN,
+    CLIENT_ID: process.env.CLIENT_ID,
+    GUILD_ID: process.env.GUILD_ID,
+    TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
+    STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
+    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
+    TRANSCRIPT_CHANNEL_ID: '1387582544278585487',
+    OWNER_USER_ID: '752590954388783196' // Your Discord user ID
+};
+
+// Check if all required variables are loaded
+console.log('🔍 Checking environment variables...');
+if (!CONFIG.TOKEN) {
+    console.error('❌ DISCORD_TOKEN is missing!');
+    process.exit(1);
+}
+console.log('✅ Environment variables loaded successfully');
+
+// Create Discord client
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages  // Added for DM support
+    ],
+    partials: ['CHANNEL']  // Required for DMs
+});
+
+// Track active tickets to prevent duplicates and store messages
+const activeTickets = new Map();
+const ticketMessages = new Map(); // Store messages for each ticket
+
+// Dynamic pricing system
+let PRICES = {
+    buyUnder1B: 0.045,  // Price per million for under 1B
+    buyOver1B: 0.04,    // Price per million for 1B+
+    sell: 0.012         // Price per million for selling
+};
+
+// Store info messages with channel info to delete and repost them
+const infoMessages = new Map(); // messageId -> { channelId, messageId }
+
+// Bot ready event
+client.once('ready', async () => {
+    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
+    await deployCommands();
+});
+
+// Message handler to track ticket messages
+client.on('messageCreate', async (message) => {
+    // Track ALL messages in ticket channels (before bot check)
+    if (message.channel.name && message.channel.name.startsWith('ticket-')) {
+        if (!ticketMessages.has(message.channel.id)) {
+            ticketMessages.set(message.channel.id, []);
+        }
+        
+        // Store message data for both bot and user messages
+        const messageData = {
+            timestamp: new Date(),
+            author: message.author.username,
+            authorId: message.author.id,
+            content: message.content,
+            embeds: message.embeds.map(embed => ({
+                title: embed.title,
+                description: embed.description,
+                fields: embed.fields
+            })),
+            isBot: message.author.bot
+        };
+        
+        ticketMessages.get(message.channel.id).push(messageData);
+        console.log(`Tracked message in ${message.channel.name}: ${message.author.username}: ${message.content.substring(0, 50)}...`);
+    }
+    
+    if (message.author.bot) return;
+    
+    // Handle DM commands (only for bot owner)
+    if (message.channel.type === 1) { // DM channel
+        if (message.author.id !== CONFIG.OWNER_USER_ID) {
+            return await message.reply('❌ This bot only responds to its owner in DMs.');
+        }
+        
+        // DM-specific commands for owner
+        if (message.content === '!dmhelp') {
+            const dmHelpEmbed = new EmbedBuilder()
+                .setTitle('🔧 Bot Owner DM Commands')
+                .setColor(0x7289da)
+                .addFields(
+                    { name: '!servers', value: 'List all servers the bot is in', inline: false },
+                    { name: '!stats', value: 'Show bot statistics', inline: false },
+                    { name: '!prices', value: 'Show current coin prices', inline: false },
+                    { name: '!setprice <under1b> <over1b> <sell>', value: 'Update prices via DM', inline: false },
+                    { name: '!dmhelp', value: 'Show this help menu', inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Owner Commands' });
+            
+            return await message.reply({ embeds: [dmHelpEmbed] });
+        }
+        
+        if (message.content === '!servers') {
+            const servers = client.guilds.cache.map(guild => 
+                `**${guild.name}** (${guild.id}) - ${guild.memberCount} members`
+            ).join('\n') || 'No servers';
+            
+            const serverEmbed = new EmbedBuilder()
+                .setTitle('🌐 Bot Servers')
+                .setDescription(servers)
+                .setColor(0x00ff00)
+                .setFooter({ text: `Total: ${client.guilds.cache.size} servers` });
+            
+            return await message.reply({ embeds: [serverEmbed] });
+        }
+        
+        if (message.content === '!stats') {
+            const uptime = process.uptime();
+            const days = Math.floor(uptime / 86400);
+            const hours = Math.floor(uptime / 3600) % 24;
+            const minutes = Math.floor(uptime / 60) % 60;
+            
+            const statsEmbed = new EmbedBuilder()
+                .setTitle('📊 Bot Statistics')
+                .setColor(0x5865f2)
+                .addFields(
+                    { name: 'Servers', value: client.guilds.cache.size.toString(), inline: true },
+                    { name: 'Active Tickets', value: activeTickets.size.toString(), inline: true },
+                    { name: 'Tracked Messages', value: Array.from(ticketMessages.values()).reduce((total, msgs) => total + msgs.length, 0).toString(), inline: true },
+                    { name: 'Uptime', value: `${days}d ${hours}h ${minutes}m`, inline: true },
+                    { name: 'Memory Usage', value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, inline: true },
+                    { name: 'Ping', value: `${client.ws.ping}ms`, inline: true }
+                )
+                .setFooter({ text: 'David\'s Coins | Bot Stats' });
+            
+            return await message.reply({ embeds: [statsEmbed] });
+        }
+        
+        if (message.content === '!prices') {
+            const pricesEmbed = new EmbedBuilder()
+                .setTitle('💰 Current Coin Prices')
+                .setColor(0xf39c12)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: false },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: false },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Current Pricing' });
+            
+            return await message.reply({ embeds: [pricesEmbed] });
+        }
+        
+        if (message.content.startsWith('!setprice ')) {
+            const args = message.content.split(' ').slice(1);
+            if (args.length !== 3) {
+                return await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.045 0.04 0.012`');
+            }
+            
+            const [newBuyUnder1B, newBuyOver1B, newSell] = args.map(parseFloat);
+            
+            if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
+                return await message.reply('❌ All prices must be valid numbers.');
+            }
+            
+            if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
+                return await message.reply('❌ All prices must be greater than 0.');
+            }
+            
+            // Update prices
+            PRICES.buyUnder1B = newBuyUnder1B;
+            PRICES.buyOver1B = newBuyOver1B;
+            PRICES.sell = newSell;
+            
+            // Update all info messages in all servers
+            for (const guild of client.guilds.cache.values()) {
+                try {
+                    await updateAllInfoMessages(guild);
+                } catch (error) {
+                    console.error(`Error updating prices in guild ${guild.name}:`, error);
+                }
+            }
+            
+            const confirmEmbed = new EmbedBuilder()
+                .setTitle('✅ Prices Updated Successfully')
+                .setColor(0x00ff00)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
+                )
+                .setFooter({ text: 'All servers have been updated automatically' });
+            
+            return await message.reply({ embeds: [confirmEmbed] });
+        }
+        
+        // If no DM command matched, show help
+        return await message.reply('❓ Unknown command. Use `!dmhelp` to see available commands.');
+    }
+    
+    // Server commands below (existing code)
+    // Check if user has staff role for most commands
+    const isStaff = message.member && message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
+    
+    // !crypto - Available to everyone
+    if (message.content === '!crypto') {
+        const cryptoEmbed = new EmbedBuilder()
+            .setTitle("🪙 Cryptocurrency Wallet Addresses")
+            .setColor(0xf39c12)
+            .setDescription("**Send payments to the addresses below:**")
+            .addFields(
+                {
+                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
+                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
+                    inline: false
+                },
+                {
+                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
+                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
+                    inline: false
+                },
+                {
+                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
+                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
+                    inline: false
+                },
+                {
+                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
+                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
+
+        const cryptoButtons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('copy_ltc')
+                    .setLabel('Copy LTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494812269412372'),
+                new ButtonBuilder()
+                    .setCustomId('copy_btc')
+                    .setLabel('Copy BTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494854497669242'),
+                new ButtonBuilder()
+                    .setCustomId('copy_eth')
+                    .setLabel('Copy ETH')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494868531675226'),
+                new ButtonBuilder()
+                    .setCustomId('copy_usdt')
+                    .setLabel('Copy USDT')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494839855218798')
+            );
+
+        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+        return;
+    }
+    
+    // All other commands - Staff only
+    if (!isStaff) {
+        // If not staff and they try any other ! command, ignore it
+        if (message.content.startsWith('!')) {
+            return;
+        }
+    }
+    
+    // Staff-only commands below
+    if (message.content === '!info') {
+        const embed = new EmbedBuilder()
+            .setTitle("David's Coins")
+            .setColor(0x5865F2)
+            .addFields(
+                {
+                    name: "Coins Buy Prices:",
+                    value: `• ${PRICES.buyUnder1B}/m for 300m-1b (${PRICES.buyUnder1B * 1000} per 1B)\n• ${PRICES.buyOver1B}/m for 1b+ (${PRICES.buyOver1B * 1000} per 1B)`,
+                    inline: false
+                },
+                {
+                    name: "Coins Sell Prices:",
+                    value: `• ${PRICES.sell}/m for 1b+ (${PRICES.sell * 1000} per 1B)`,
+                    inline: false
+                },
+                {
+                    name: "Payment Methods:",
+                    value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
+                    inline: false
+                }
+            );
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('buy_coins')
+                    .setLabel('Buy')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('sell_coins')
+                    .setLabel('Sell')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('calculate_coins')
+                    .setLabel('Calculate')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+        const infoMessage = await message.reply({ embeds: [embed], components: [row] });
+        
+        // Store this message info to delete and repost it later when prices change
+        infoMessages.set(infoMessage.id, {
+            channelId: message.channel.id,
+            messageId: infoMessage.id
+        });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!rules') {
+        const rulesEmbed = new EmbedBuilder()
+            .setTitle("📋 Server Rules")
+            .setColor(0xff6b6b)
+            .setDescription("Please follow these rules to ensure a safe and professional trading environment:")
+            .addFields(
+                {
+                    name: "**1. Have basic human decency**",
+                    value: "Treat all members with respect and courtesy.",
+                    inline: false
+                },
+                {
+                    name: "**2. Don't advertise in chat or in DMs**",
+                    value: "No promotion of other services or unsolicited messages.",
+                    inline: false
+                },
+                {
+                    name: "**3. Don't attempt to scam**",
+                    value: "Any fraudulent activity will result in immediate ban.",
+                    inline: false
+                },
+                {
+                    name: "**4. Don't spam the ticket system**",
+                    value: "Only create tickets for legitimate transactions.",
+                    inline: false
+                },
+                {
+                    name: "**5. Don't leak other players' IGNs**",
+                    value: "Respect privacy and keep player information confidential.",
+                    inline: false
+                },
+                {
+                    name: "**6. Communicate through English**",
+                    value: "All communication must be in English for clarity.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "Violation of these rules may result in warnings, mutes, or permanent bans." });
+
+        await message.reply({ embeds: [rulesEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!tos') {
+        const tosEmbed = new EmbedBuilder()
+            .setTitle("📜 Terms of Service")
+            .setColor(0xffa500)
+            .setDescription("**Once you join David's Coins, you're automatically agreeing to the following terms:**")
+            .addFields(
+                {
+                    name: "1. No Refunds",
+                    value: "There are no refunds once the transaction has taken place.",
+                    inline: false
+                },
+                {
+                    name: "2. Chargeback Policy",
+                    value: "Any and all chargebacks will result in a permanent ban from our discord server.",
+                    inline: false
+                },
+                {
+                    name: "3. Payment Verification",
+                    value: "By purchasing any goods from us you acknowledge that the money is totally yours.",
+                    inline: false
+                },
+                {
+                    name: "4. Ban Rights",
+                    value: "We reserve the right to ban anyone from our discord server at any point in time for any reason, any paid for and not received items will get refunded.",
+                    inline: false
+                },
+                {
+                    name: "5. Service Refusal",
+                    value: "We reserve the right to refuse service to anyone at anytime.",
+                    inline: false
+                },
+                {
+                    name: "6. Server Protection",
+                    value: "If any damage is caused onto our server by you, we reserve the right to ban you without a refund.",
+                    inline: false
+                },
+                {
+                    name: "7. Terms Changes",
+                    value: "These terms are subject to change at any time without notice to the client.",
+                    inline: false
+                },
+                {
+                    name: "8. Price Changes",
+                    value: "We reserve the right to change the price of our products at any time we want.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "By using our services, you agree to these terms and conditions." });
+
+        await message.reply({ embeds: [tosEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!verify') {
+        const verifyEmbed = new EmbedBuilder()
+            .setTitle("✅ Server Verification")
+            .setColor(0x00ff00)
+            .setDescription("Welcome to **David's Coins**!\n\nClick the ✅ reaction below to verify yourself and gain access to the server.");
+
+        const verifyMessage = await message.reply({ embeds: [verifyEmbed] });
+        
+        // Add checkmark reaction
+        await verifyMessage.react('✅');
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!payments') {
+        const paymentsEmbed = new EmbedBuilder()
+            .setTitle("💳 Payment Methods")
+            .setColor(0x2ecc71)
+            .setDescription("**David's Coins** accepts the following secure payment methods for all transactions:")
+            .addFields(
+                {
+                    name: "🪙 **Primary Cryptocurrencies**",
+                    value: "<:BTC:1387494854497669242> **Bitcoin (BTC)**\n<:ETH:1387494868531675226> **Ethereum (ETH)**\n<:LTC:1387494812269412372> **Litecoin (LTC)**\n<:USDT:1387494839855218798> **Tether (USDT)**",
+                    inline: false
+                },
+                {
+                    name: "⚡ **Why Cryptocurrency?**",
+                    value: "• **Fast transactions** - Nearly instant transfers\n• **Low fees** - Minimal processing costs\n• **Secure** - Blockchain-verified transactions\n• **Global** - Available worldwide 24/7",
+                    inline: false
+                },
+                {
+                    name: "**Additional Payment Options**",
+                    value: "We may accept other payment methods on a case-by-case basis. Please contact our staff through a ticket to discuss alternative payment arrangements.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Secure & Professional Trading • All transactions are final" });
+
+        await message.reply({ embeds: [paymentsEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!help') {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle("📚 Available Commands")
+            .setColor(0x7289da)
+            .setDescription("Here are all the available commands for **David's Coins**:")
+            .addFields(
+                {
+                    name: "🛒 **!info**",
+                    value: "View shop information, prices, and payment methods with Buy/Sell buttons",
+                    inline: false
+                },
+                {
+                    name: "📋 **!rules**",
+                    value: "Display server rules and guidelines for a safe trading environment",
+                    inline: false
+                },
+                {
+                    name: "📜 **!tos**",
+                    value: "View our Terms of Service and important legal information",
+                    inline: false
+                },
+                {
+                    name: "💳 **!payments**",
+                    value: "View accepted payment methods and transaction information",
+                    inline: false
+                },
+                {
+                    name: "🪙 **!crypto**",
+                    value: "Display cryptocurrency wallet addresses for payments",
+                    inline: false
+                },
+                {
+                    name: "✅ **!verify**",
+                    value: "Verify yourself to gain access to the server (react with ✅)",
+                    inline: false
+                },
+                {
+                    name: "📚 **!help**",
+                    value: "Show this help menu with all available commands",
+                    inline: false
+                },
+                {
+                    name: "🔒 **!close**",
+                    value: "Close a ticket (staff only, must be used in ticket channels)",
+                    inline: false
+                },
+                {
+                    name: "💰 **!price**",
+                    value: "Update coin prices (staff only, updates all existing price displays)",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
+
+        await message.reply({ embeds: [helpEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!close') {
+        // Check if this is a ticket channel
+        if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
+            return await message.reply('This command can only be used in ticket channels.');
+        }
+        
+        await message.reply('Generating transcript and closing ticket in 5 seconds...');
+        
+        // Generate and send transcript
+        try {
+            const transcriptContent = await generateTranscript(
+                message.channel.id, 
+                message.channel.name,
+                message.channel.ticketInfo || {}
+            );
+            
+            // Create transcript file
+            const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
+            const attachment = new AttachmentBuilder(transcriptBuffer, { 
+                name: `transcript-${message.channel.name}.txt` 
+            });
+            
+            // Send transcript to transcript channel
+            const transcriptChannel = message.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
+            if (transcriptChannel) {
+                const transcriptEmbed = new EmbedBuilder()
+                    .setTitle('📄 Ticket Transcript')
+                    .setDescription(`Transcript for ${message.channel.name}`)
+                    .addFields(
+                        { name: 'Ticket Channel', value: message.channel.name, inline: true },
+                        { name: 'Closed By', value: message.author.username, inline: true },
+                        { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                    )
+                    .setColor(0x2ecc71)
+                    .setFooter({ text: 'David\'s Coins | Ticket System' });
+                
+                await transcriptChannel.send({ 
+                    embeds: [transcriptEmbed], 
+                    files: [attachment] 
+                });
+                
+                console.log(`Transcript sent via !close command for ticket ${message.channel.name}`);
+            } else {
+                console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
+            }
+        } catch (error) {
+            console.error('Error generating transcript via !close:', error);
+        }
+        
+        // Remove from active tickets
+        for (const [userId, channelId] of activeTickets) {
+            if (channelId === message.channel.id) {
+                activeTickets.delete(userId);
+                break;
+            }
+        }
+        
+        // Clean up message tracking
+        ticketMessages.delete(message.channel.id);
+
+        setTimeout(async () => {
+            try {
+                await message.channel.delete();
+            } catch (error) {
+                console.error('Error deleting channel via !close:', error);
+            }
+        }, 5000);
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !close message:', error);
+        }
+    }
+    
+    if (message.content === '!price') {
+        const modal = new ModalBuilder()
+            .setCustomId('price_modal')
+            .setTitle('Update Coin Prices');
+
+        const buyUnder1BInput = new TextInputBuilder()
+            .setCustomId('buy_under_1b_input')
+            .setLabel('Buy Price Under 1B (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyUnder1B.toString())
+            .setPlaceholder('e.g., 0.045');
+
+        const buyOver1BInput = new TextInputBuilder()
+            .setCustomId('buy_over_1b_input')
+            .setLabel('Buy Price 1B+ (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyOver1B.toString())
+            .setPlaceholder('e.g., 0.04');
+
+        const sellInput = new TextInputBuilder()
+            .setCustomId('sell_input')
+            .setLabel('Sell Price (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.sell.toString())
+            .setPlaceholder('e.g., 0.012');
+
+        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+        
+        // Create a temporary interaction to show the modal
+        const tempMessage = await message.reply('Opening price update modal...');
+        
+        //)
                     .setMaxLength(10);
 
                 const firstRow = new ActionRowBuilder().addComponents(moneyInput);
@@ -1298,10 +1334,9 @@ client.on('interactionCreate', async (interaction) => {
             const channel = interaction.channel;
             const member = interaction.member;
             
-            // Check if user is the bot owner
-            if (interaction.user.id !== CONFIG.OWNER_USER_ID) {
+            if (!member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
                 return await interaction.reply({
-                    content: 'Only the bot owner can close tickets.',
+                    content: 'Only staff members can close tickets.',
                     ephemeral: true
                 });
             }
@@ -1406,4 +1441,674 @@ client.login(CONFIG.TOKEN).then(() => {
 }).catch((error) => {
     console.error('❌ Bot login failed:', error);
     process.exit(1);
+});// Load environment variables from .env file
+require('dotenv').config();
+
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
+
+// Configuration using environment variables (safer than hardcoding)
+const CONFIG = {
+    TOKEN: process.env.DISCORD_TOKEN,
+    CLIENT_ID: process.env.CLIENT_ID,
+    GUILD_ID: process.env.GUILD_ID,
+    TICKET_CATEGORY_ID: process.env.TICKET_CATEGORY_ID,
+    STAFF_ROLE_ID: process.env.STAFF_ROLE_ID,
+    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID,
+    TRANSCRIPT_CHANNEL_ID: '1387582544278585487',
+    OWNER_USER_ID: '752590954388783196' // Your Discord user ID
+};
+
+// Check if all required variables are loaded
+console.log('🔍 Checking environment variables...');
+if (!CONFIG.TOKEN) {
+    console.error('❌ DISCORD_TOKEN is missing!');
+    process.exit(1);
+}
+console.log('✅ Environment variables loaded successfully');
+
+// Create Discord client
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages  // Added for DM support
+    ],
+    partials: ['CHANNEL']  // Required for DMs
 });
+
+// Track active tickets to prevent duplicates and store messages
+const activeTickets = new Map();
+const ticketMessages = new Map(); // Store messages for each ticket
+
+// Dynamic pricing system
+let PRICES = {
+    buyUnder1B: 0.045,  // Price per million for under 1B
+    buyOver1B: 0.04,    // Price per million for 1B+
+    sell: 0.012         // Price per million for selling
+};
+
+// Store info messages with channel info to delete and repost them
+const infoMessages = new Map(); // messageId -> { channelId, messageId }
+
+// Bot ready event
+client.once('ready', async () => {
+    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
+    await deployCommands();
+});
+
+// Message handler to track ticket messages
+client.on('messageCreate', async (message) => {
+    // Track ALL messages in ticket channels (before bot check)
+    if (message.channel.name && message.channel.name.startsWith('ticket-')) {
+        if (!ticketMessages.has(message.channel.id)) {
+            ticketMessages.set(message.channel.id, []);
+        }
+        
+        // Store message data for both bot and user messages
+        const messageData = {
+            timestamp: new Date(),
+            author: message.author.username,
+            authorId: message.author.id,
+            content: message.content,
+            embeds: message.embeds.map(embed => ({
+                title: embed.title,
+                description: embed.description,
+                fields: embed.fields
+            })),
+            isBot: message.author.bot
+        };
+        
+        ticketMessages.get(message.channel.id).push(messageData);
+        console.log(`Tracked message in ${message.channel.name}: ${message.author.username}: ${message.content.substring(0, 50)}...`);
+    }
+    
+    if (message.author.bot) return;
+    
+    // Handle DM commands (only for bot owner)
+    if (message.channel.type === 1) { // DM channel
+        if (message.author.id !== CONFIG.OWNER_USER_ID) {
+            return await message.reply('❌ This bot only responds to its owner in DMs.');
+        }
+        
+        // DM-specific commands for owner
+        if (message.content === '!dmhelp') {
+            const dmHelpEmbed = new EmbedBuilder()
+                .setTitle('🔧 Bot Owner DM Commands')
+                .setColor(0x7289da)
+                .addFields(
+                    { name: '!servers', value: 'List all servers the bot is in', inline: false },
+                    { name: '!stats', value: 'Show bot statistics', inline: false },
+                    { name: '!prices', value: 'Show current coin prices', inline: false },
+                    { name: '!setprice <under1b> <over1b> <sell>', value: 'Update prices via DM', inline: false },
+                    { name: '!dmhelp', value: 'Show this help menu', inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Owner Commands' });
+            
+            return await message.reply({ embeds: [dmHelpEmbed] });
+        }
+        
+        if (message.content === '!servers') {
+            const servers = client.guilds.cache.map(guild => 
+                `**${guild.name}** (${guild.id}) - ${guild.memberCount} members`
+            ).join('\n') || 'No servers';
+            
+            const serverEmbed = new EmbedBuilder()
+                .setTitle('🌐 Bot Servers')
+                .setDescription(servers)
+                .setColor(0x00ff00)
+                .setFooter({ text: `Total: ${client.guilds.cache.size} servers` });
+            
+            return await message.reply({ embeds: [serverEmbed] });
+        }
+        
+        if (message.content === '!stats') {
+            const uptime = process.uptime();
+            const days = Math.floor(uptime / 86400);
+            const hours = Math.floor(uptime / 3600) % 24;
+            const minutes = Math.floor(uptime / 60) % 60;
+            
+            const statsEmbed = new EmbedBuilder()
+                .setTitle('📊 Bot Statistics')
+                .setColor(0x5865f2)
+                .addFields(
+                    { name: 'Servers', value: client.guilds.cache.size.toString(), inline: true },
+                    { name: 'Active Tickets', value: activeTickets.size.toString(), inline: true },
+                    { name: 'Tracked Messages', value: Array.from(ticketMessages.values()).reduce((total, msgs) => total + msgs.length, 0).toString(), inline: true },
+                    { name: 'Uptime', value: `${days}d ${hours}h ${minutes}m`, inline: true },
+                    { name: 'Memory Usage', value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, inline: true },
+                    { name: 'Ping', value: `${client.ws.ping}ms`, inline: true }
+                )
+                .setFooter({ text: 'David\'s Coins | Bot Stats' });
+            
+            return await message.reply({ embeds: [statsEmbed] });
+        }
+        
+        if (message.content === '!prices') {
+            const pricesEmbed = new EmbedBuilder()
+                .setTitle('💰 Current Coin Prices')
+                .setColor(0xf39c12)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: false },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: false },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: false }
+                )
+                .setFooter({ text: 'David\'s Coins | Current Pricing' });
+            
+            return await message.reply({ embeds: [pricesEmbed] });
+        }
+        
+        if (message.content.startsWith('!setprice ')) {
+            const args = message.content.split(' ').slice(1);
+            if (args.length !== 3) {
+                return await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.045 0.04 0.012`');
+            }
+            
+            const [newBuyUnder1B, newBuyOver1B, newSell] = args.map(parseFloat);
+            
+            if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
+                return await message.reply('❌ All prices must be valid numbers.');
+            }
+            
+            if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
+                return await message.reply('❌ All prices must be greater than 0.');
+            }
+            
+            // Update prices
+            PRICES.buyUnder1B = newBuyUnder1B;
+            PRICES.buyOver1B = newBuyOver1B;
+            PRICES.sell = newSell;
+            
+            // Update all info messages in all servers
+            for (const guild of client.guilds.cache.values()) {
+                try {
+                    await updateAllInfoMessages(guild);
+                } catch (error) {
+                    console.error(`Error updating prices in guild ${guild.name}:`, error);
+                }
+            }
+            
+            const confirmEmbed = new EmbedBuilder()
+                .setTitle('✅ Prices Updated Successfully')
+                .setColor(0x00ff00)
+                .addFields(
+                    { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
+                    { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
+                    { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
+                )
+                .setFooter({ text: 'All servers have been updated automatically' });
+            
+            return await message.reply({ embeds: [confirmEmbed] });
+        }
+        
+        // If no DM command matched, show help
+        return await message.reply('❓ Unknown command. Use `!dmhelp` to see available commands.');
+    }
+    
+    // Server commands below (existing code)
+    // Check if user has staff role for most commands
+    const isStaff = message.member && message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
+    
+    // !crypto - Available to everyone
+    if (message.content === '!crypto') {
+        const cryptoEmbed = new EmbedBuilder()
+            .setTitle("🪙 Cryptocurrency Wallet Addresses")
+            .setColor(0xf39c12)
+            .setDescription("**Send payments to the addresses below:**")
+            .addFields(
+                {
+                    name: "<:LTC:1387494812269412372> **Litecoin (LTC)**",
+                    value: "```MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43```",
+                    inline: false
+                },
+                {
+                    name: "<:BTC:1387494854497669242> **Bitcoin (BTC)**",
+                    value: "```3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu```",
+                    inline: false
+                },
+                {
+                    name: "<:ETH:1387494868531675226> **Ethereum (ETH)**",
+                    value: "```0x753488DE45f33047806ac23B2693d87167829E08```",
+                    inline: false
+                },
+                {
+                    name: "<:USDT:1387494839855218798> **Tether (USDT)**",
+                    value: "```0xC41199c503C615554fA97803db6a688685e567D5```",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Always verify addresses before sending • Transactions are irreversible" });
+
+        const cryptoButtons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('copy_ltc')
+                    .setLabel('Copy LTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494812269412372'),
+                new ButtonBuilder()
+                    .setCustomId('copy_btc')
+                    .setLabel('Copy BTC')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494854497669242'),
+                new ButtonBuilder()
+                    .setCustomId('copy_eth')
+                    .setLabel('Copy ETH')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494868531675226'),
+                new ButtonBuilder()
+                    .setCustomId('copy_usdt')
+                    .setLabel('Copy USDT')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('1387494839855218798')
+            );
+
+        await message.reply({ embeds: [cryptoEmbed], components: [cryptoButtons] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+        return;
+    }
+    
+    // All other commands - Staff only
+    if (!isStaff) {
+        // If not staff and they try any other ! command, ignore it
+        if (message.content.startsWith('!')) {
+            return;
+        }
+    }
+    
+    // Staff-only commands below
+    if (message.content === '!info') {
+        const embed = new EmbedBuilder()
+            .setTitle("David's Coins")
+            .setColor(0x5865F2)
+            .addFields(
+                {
+                    name: "Coins Buy Prices:",
+                    value: `• ${PRICES.buyUnder1B}/m for 300m-1b (${PRICES.buyUnder1B * 1000} per 1B)\n• ${PRICES.buyOver1B}/m for 1b+ (${PRICES.buyOver1B * 1000} per 1B)`,
+                    inline: false
+                },
+                {
+                    name: "Coins Sell Prices:",
+                    value: `• ${PRICES.sell}/m for 1b+ (${PRICES.sell * 1000} per 1B)`,
+                    inline: false
+                },
+                {
+                    name: "Payment Methods:",
+                    value: "<:LTC:1387494812269412372> <:BTC:1387494854497669242> <:ETH:1387494868531675226> <:USDT:1387494839855218798>",
+                    inline: false
+                }
+            );
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('buy_coins')
+                    .setLabel('Buy')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('sell_coins')
+                    .setLabel('Sell')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('calculate_coins')
+                    .setLabel('Calculate')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+        const infoMessage = await message.reply({ embeds: [embed], components: [row] });
+        
+        // Store this message info to delete and repost it later when prices change
+        infoMessages.set(infoMessage.id, {
+            channelId: message.channel.id,
+            messageId: infoMessage.id
+        });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!rules') {
+        const rulesEmbed = new EmbedBuilder()
+            .setTitle("📋 Server Rules")
+            .setColor(0xff6b6b)
+            .setDescription("Please follow these rules to ensure a safe and professional trading environment:")
+            .addFields(
+                {
+                    name: "**1. Have basic human decency**",
+                    value: "Treat all members with respect and courtesy.",
+                    inline: false
+                },
+                {
+                    name: "**2. Don't advertise in chat or in DMs**",
+                    value: "No promotion of other services or unsolicited messages.",
+                    inline: false
+                },
+                {
+                    name: "**3. Don't attempt to scam**",
+                    value: "Any fraudulent activity will result in immediate ban.",
+                    inline: false
+                },
+                {
+                    name: "**4. Don't spam the ticket system**",
+                    value: "Only create tickets for legitimate transactions.",
+                    inline: false
+                },
+                {
+                    name: "**5. Don't leak other players' IGNs**",
+                    value: "Respect privacy and keep player information confidential.",
+                    inline: false
+                },
+                {
+                    name: "**6. Communicate through English**",
+                    value: "All communication must be in English for clarity.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "Violation of these rules may result in warnings, mutes, or permanent bans." });
+
+        await message.reply({ embeds: [rulesEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!tos') {
+        const tosEmbed = new EmbedBuilder()
+            .setTitle("📜 Terms of Service")
+            .setColor(0xffa500)
+            .setDescription("**Once you join David's Coins, you're automatically agreeing to the following terms:**")
+            .addFields(
+                {
+                    name: "1. No Refunds",
+                    value: "There are no refunds once the transaction has taken place.",
+                    inline: false
+                },
+                {
+                    name: "2. Chargeback Policy",
+                    value: "Any and all chargebacks will result in a permanent ban from our discord server.",
+                    inline: false
+                },
+                {
+                    name: "3. Payment Verification",
+                    value: "By purchasing any goods from us you acknowledge that the money is totally yours.",
+                    inline: false
+                },
+                {
+                    name: "4. Ban Rights",
+                    value: "We reserve the right to ban anyone from our discord server at any point in time for any reason, any paid for and not received items will get refunded.",
+                    inline: false
+                },
+                {
+                    name: "5. Service Refusal",
+                    value: "We reserve the right to refuse service to anyone at anytime.",
+                    inline: false
+                },
+                {
+                    name: "6. Server Protection",
+                    value: "If any damage is caused onto our server by you, we reserve the right to ban you without a refund.",
+                    inline: false
+                },
+                {
+                    name: "7. Terms Changes",
+                    value: "These terms are subject to change at any time without notice to the client.",
+                    inline: false
+                },
+                {
+                    name: "8. Price Changes",
+                    value: "We reserve the right to change the price of our products at any time we want.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "By using our services, you agree to these terms and conditions." });
+
+        await message.reply({ embeds: [tosEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!verify') {
+        const verifyEmbed = new EmbedBuilder()
+            .setTitle("✅ Server Verification")
+            .setColor(0x00ff00)
+            .setDescription("Welcome to **David's Coins**!\n\nClick the ✅ reaction below to verify yourself and gain access to the server.");
+
+        const verifyMessage = await message.reply({ embeds: [verifyEmbed] });
+        
+        // Add checkmark reaction
+        await verifyMessage.react('✅');
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!payments') {
+        const paymentsEmbed = new EmbedBuilder()
+            .setTitle("💳 Payment Methods")
+            .setColor(0x2ecc71)
+            .setDescription("**David's Coins** accepts the following secure payment methods for all transactions:")
+            .addFields(
+                {
+                    name: "🪙 **Primary Cryptocurrencies**",
+                    value: "<:BTC:1387494854497669242> **Bitcoin (BTC)**\n<:ETH:1387494868531675226> **Ethereum (ETH)**\n<:LTC:1387494812269412372> **Litecoin (LTC)**\n<:USDT:1387494839855218798> **Tether (USDT)**",
+                    inline: false
+                },
+                {
+                    name: "⚡ **Why Cryptocurrency?**",
+                    value: "• **Fast transactions** - Nearly instant transfers\n• **Low fees** - Minimal processing costs\n• **Secure** - Blockchain-verified transactions\n• **Global** - Available worldwide 24/7",
+                    inline: false
+                },
+                {
+                    name: "**Additional Payment Options**",
+                    value: "We may accept other payment methods on a case-by-case basis. Please contact our staff through a ticket to discuss alternative payment arrangements.",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Secure & Professional Trading • All transactions are final" });
+
+        await message.reply({ embeds: [paymentsEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!help') {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle("📚 Available Commands")
+            .setColor(0x7289da)
+            .setDescription("Here are all the available commands for **David's Coins**:")
+            .addFields(
+                {
+                    name: "🛒 **!info**",
+                    value: "View shop information, prices, and payment methods with Buy/Sell buttons",
+                    inline: false
+                },
+                {
+                    name: "📋 **!rules**",
+                    value: "Display server rules and guidelines for a safe trading environment",
+                    inline: false
+                },
+                {
+                    name: "📜 **!tos**",
+                    value: "View our Terms of Service and important legal information",
+                    inline: false
+                },
+                {
+                    name: "💳 **!payments**",
+                    value: "View accepted payment methods and transaction information",
+                    inline: false
+                },
+                {
+                    name: "🪙 **!crypto**",
+                    value: "Display cryptocurrency wallet addresses for payments",
+                    inline: false
+                },
+                {
+                    name: "✅ **!verify**",
+                    value: "Verify yourself to gain access to the server (react with ✅)",
+                    inline: false
+                },
+                {
+                    name: "📚 **!help**",
+                    value: "Show this help menu with all available commands",
+                    inline: false
+                },
+                {
+                    name: "🔒 **!close**",
+                    value: "Close a ticket (staff only, must be used in ticket channels)",
+                    inline: false
+                },
+                {
+                    name: "💰 **!price**",
+                    value: "Update coin prices (staff only, updates all existing price displays)",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
+
+        await message.reply({ embeds: [helpEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+    }
+    
+    if (message.content === '!close') {
+        // Check if this is a ticket channel
+        if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
+            return await message.reply('This command can only be used in ticket channels.');
+        }
+        
+        await message.reply('Generating transcript and closing ticket in 5 seconds...');
+        
+        // Generate and send transcript
+        try {
+            const transcriptContent = await generateTranscript(
+                message.channel.id, 
+                message.channel.name,
+                message.channel.ticketInfo || {}
+            );
+            
+            // Create transcript file
+            const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
+            const attachment = new AttachmentBuilder(transcriptBuffer, { 
+                name: `transcript-${message.channel.name}.txt` 
+            });
+            
+            // Send transcript to transcript channel
+            const transcriptChannel = message.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
+            if (transcriptChannel) {
+                const transcriptEmbed = new EmbedBuilder()
+                    .setTitle('📄 Ticket Transcript')
+                    .setDescription(`Transcript for ${message.channel.name}`)
+                    .addFields(
+                        { name: 'Ticket Channel', value: message.channel.name, inline: true },
+                        { name: 'Closed By', value: message.author.username, inline: true },
+                        { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                    )
+                    .setColor(0x2ecc71)
+                    .setFooter({ text: 'David\'s Coins | Ticket System' });
+                
+                await transcriptChannel.send({ 
+                    embeds: [transcriptEmbed], 
+                    files: [attachment] 
+                });
+                
+                console.log(`Transcript sent via !close command for ticket ${message.channel.name}`);
+            } else {
+                console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
+            }
+        } catch (error) {
+            console.error('Error generating transcript via !close:', error);
+        }
+        
+        // Remove from active tickets
+        for (const [userId, channelId] of activeTickets) {
+            if (channelId === message.channel.id) {
+                activeTickets.delete(userId);
+                break;
+            }
+        }
+        
+        // Clean up message tracking
+        ticketMessages.delete(message.channel.id);
+
+        setTimeout(async () => {
+            try {
+                await message.channel.delete();
+            } catch (error) {
+                console.error('Error deleting channel via !close:', error);
+            }
+        }, 5000);
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !close message:', error);
+        }
+    }
+    
+    if (message.content === '!price') {
+        const modal = new ModalBuilder()
+            .setCustomId('price_modal')
+            .setTitle('Update Coin Prices');
+
+        const buyUnder1BInput = new TextInputBuilder()
+            .setCustomId('buy_under_1b_input')
+            .setLabel('Buy Price Under 1B (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyUnder1B.toString())
+            .setPlaceholder('e.g., 0.045');
+
+        const buyOver1BInput = new TextInputBuilder()
+            .setCustomId('buy_over_1b_input')
+            .setLabel('Buy Price 1B+ (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyOver1B.toString())
+            .setPlaceholder('e.g., 0.04');
+
+        const sellInput = new TextInputBuilder()
+            .setCustomId('sell_input')
+            .setLabel('Sell Price (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.sell.toString())
+            .setPlaceholder('e.g., 0.012');
+
+        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+        
+        // Create a temporary interaction to show the modal
+        const tempMessage = await message.reply('Opening price update modal...');
+        
+        //
