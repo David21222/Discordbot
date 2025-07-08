@@ -54,6 +54,7 @@ const infoMessages = new Map(); // messageId -> { channelId, messageId }
 client.once('ready', async () => {
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
     console.log(`📊 Serving ${client.guilds.cache.size} guild(s)`);
+    await deployCommands();
 });
 
 // Message handler to track ticket messages
@@ -606,6 +607,105 @@ client.on('messageCreate', async (message) => {
         // Remove from active tickets
         for (const [userId, channelId] of activeTickets) {
             if (channelId === message.channel.id) {
+                activeTickets.delete(userId);
+                break;
+            }
+        }
+        
+        // Clean up message tracking
+        ticketMessages.delete(message.channel.id);
+
+        setTimeout(async () => {
+            try {
+                await message.channel.delete();
+            } catch (error) {
+                console.error('Error deleting channel via !close:', error);
+            }
+        }, 5000);
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !close message:', error);
+        }
+    }
+    
+    if (message.content === '!price') {
+        const modal = new ModalBuilder()
+            .setCustomId('price_modal')
+            .setTitle('Update Coin Prices');
+
+        const buyUnder1BInput = new TextInputBuilder()
+            .setCustomId('buy_under_1b_input')
+            .setLabel('Buy Price Under 1B (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyUnder1B.toString())
+            .setPlaceholder('e.g., 0.045');
+
+        const buyOver1BInput = new TextInputBuilder()
+            .setCustomId('buy_over_1b_input')
+            .setLabel('Buy Price 1B+ (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.buyOver1B.toString())
+            .setPlaceholder('e.g., 0.04');
+
+        const sellInput = new TextInputBuilder()
+            .setCustomId('sell_input')
+            .setLabel('Sell Price (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.sell.toString())
+            .setPlaceholder('e.g., 0.012');
+
+        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+        
+        // Create a temporary interaction to show the modal
+        const tempMessage = await message.reply('Opening price update modal...');
+        
+        // Since we can't directly show modal from message, we'll create an interaction
+        const buttonRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('open_price_modal')
+                    .setLabel('💰 Update Prices')
+                    .setStyle(ButtonStyle.Primary)
+            );
+            
+        await tempMessage.edit({ content: 'Click the button below to update prices:', components: [buttonRow] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete !price message:', error);
+        }
+    }
+});
+
+// Member leave event
+client.on('guildMemberRemove', async (member) => {
+    try {
+        console.log(`Member left: ${member.user.username} (${member.user.id})`);
+        
+        // Check if the user who left had an active ticket
+        if (activeTickets.has(member.user.id)) {
+            const ticketChannelId = activeTickets.get(member.user.id);
+            const ticketChannel = member.guild.channels.cache.get(ticketChannelId);
+            
+            if (ticketChannel) {
+                console.log(`Sending leave message to ticket channel: ${ticketChannel.name}`);
+                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${member.user.id}> left server`);
+                
+                // Remove them from active tickets since they left
+                activeTickets.delete(member.user.id);
+                console.log(`Removed ${member.user.username} from active tickets`);
+            } else {
+                console.log(`Ticket channel not found for ${member.user.username}, removing from active tickets`);
                 activeTickets.delete(member.user.id);
             }
         } else {
@@ -974,7 +1074,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('Payment Method')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setPlaceholder('BTC, ETH, LTC, USDT')
+                    .setPlaceholder('PayPal')
                     .setMaxLength(50);
 
                 const usernameInput = new TextInputBuilder()
@@ -982,7 +1082,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('Minecraft Username')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setPlaceholder('YourMinecraftUsername')
+                    .setPlaceholder('56ms')
                     .setMinLength(3)
                     .setMaxLength(16);
 
@@ -1004,7 +1104,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('How Much Money Do You Want To Spend?')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setPlaceholder('100')
+                    .setPlaceholder('100)
                     .setMaxLength(10);
 
                 const firstRow = new ActionRowBuilder().addComponents(moneyInput);
@@ -1108,7 +1208,6 @@ client.on('interactionCreate', async (interaction) => {
                 const isBuying = interaction.customId === 'buy_modal';
                 const ign = interaction.fields.getTextInputValue('username_input');
                 const amount = interaction.fields.getTextInputValue('amount_input');
-                const payment = interaction.fields.getTextInputValue('payment_input');
 
                 // Create ticket channel
                 const guild = interaction.guild;
@@ -1185,8 +1284,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setDescription('A Seller will reply shortly!')
                     .addFields(
                         { name: 'IGN:', value: ign, inline: true },
-                        { name: `User is ${isBuying ? 'buying' : 'selling'}:`, value: amount, inline: true },
-                        { name: 'Payment Method:', value: payment, inline: true }
+                        { name: `User is ${isBuying ? 'buying' : 'selling'}:`, value: amount, inline: true }
                     );
 
                 if (totalPrice > 0) {
@@ -1203,8 +1301,7 @@ client.on('interactionCreate', async (interaction) => {
                     transaction: `${isBuying ? 'Buying' : 'Selling'} ${amount}`,
                     cost: totalPrice > 0 ? `${totalPrice.toFixed(2)} at ${rate}/m rate` : 'Price not calculated',
                     user: interaction.user.username,
-                    userId: interaction.user.id,
-                    payment: payment
+                    userId: interaction.user.id
                 };
 
                 // Store ticket info in the channel for later use
@@ -1320,6 +1417,11 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// Deploy commands function placeholder
+async function deployCommands() {
+    console.log('✅ Commands deployed (placeholder)');
+}
+
 // Error handling
 client.on('error', (error) => {
     console.error('Discord client error:', error);
@@ -1336,103 +1438,4 @@ client.login(CONFIG.TOKEN).then(() => {
 }).catch((error) => {
     console.error('❌ Bot login failed:', error);
     process.exit(1);
-});.delete(userId);
-                break;
-            }
-        }
-        
-        // Clean up message tracking
-        ticketMessages.delete(message.channel.id);
-
-        setTimeout(async () => {
-            try {
-                await message.channel.delete();
-            } catch (error) {
-                console.error('Error deleting channel via !close:', error);
-            }
-        }, 5000);
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete !close message:', error);
-        }
-    }
-    
-    if (message.content === '!price') {
-        const modal = new ModalBuilder()
-            .setCustomId('price_modal')
-            .setTitle('Update Coin Prices');
-
-        const buyUnder1BInput = new TextInputBuilder()
-            .setCustomId('buy_under_1b_input')
-            .setLabel('Buy Price Under 1B (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.buyUnder1B.toString())
-            .setPlaceholder('e.g., 0.045');
-
-        const buyOver1BInput = new TextInputBuilder()
-            .setCustomId('buy_over_1b_input')
-            .setLabel('Buy Price 1B+ (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.buyOver1B.toString())
-            .setPlaceholder('e.g., 0.04');
-
-        const sellInput = new TextInputBuilder()
-            .setCustomId('sell_input')
-            .setLabel('Sell Price (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.sell.toString())
-            .setPlaceholder('e.g., 0.012');
-
-        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
-        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
-        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
-
-        modal.addComponents(firstRow, secondRow, thirdRow);
-        
-        // Create a temporary interaction to show the modal
-        const tempMessage = await message.reply('Opening price update modal...');
-        
-        // Since we can't directly show modal from message, we'll create an interaction
-        const buttonRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('open_price_modal')
-                    .setLabel('💰 Update Prices')
-                    .setStyle(ButtonStyle.Primary)
-            );
-            
-        await tempMessage.edit({ content: 'Click the button below to update prices:', components: [buttonRow] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete !price message:', error);
-        }
-    }
 });
-
-// Member leave event
-client.on('guildMemberRemove', async (member) => {
-    try {
-        console.log(`Member left: ${member.user.username} (${member.user.id})`);
-        
-        // Check if the user who left had an active ticket
-        if (activeTickets.has(member.user.id)) {
-            const ticketChannelId = activeTickets.get(member.user.id);
-            const ticketChannel = member.guild.channels.cache.get(ticketChannelId);
-            
-            if (ticketChannel) {
-                console.log(`Sending leave message to ticket channel: ${ticketChannel.name}`);
-                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${member.user.id}> left server`);
-                
-                // Remove them from active tickets since they left
-                activeTickets.delete(member.user.id);
-                console.log(`Removed ${member.user.username} from active tickets`);
-            } else {
-                console.log(`Ticket channel not found for ${member.user.username}, removing from active tickets`);
-                activeTickets
