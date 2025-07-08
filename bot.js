@@ -313,7 +313,11 @@ client.on('messageCreate', async (message) => {
                 new ButtonBuilder()
                     .setCustomId('sell_coins')
                     .setLabel('Sell')
-                    .setStyle(ButtonStyle.Secondary)
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('calculate_coins')
+                    .setLabel('Calculate')
+                    .setStyle(ButtonStyle.Success)
             );
 
         const infoMessage = await message.reply({ embeds: [embed], components: [row] });
@@ -930,7 +934,11 @@ async function updateAllInfoMessages(guild) {
             new ButtonBuilder()
                 .setCustomId('sell_coins')
                 .setLabel('Sell')
-                .setStyle(ButtonStyle.Secondary)
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId('calculate_coins')
+                .setLabel('Calculate')
+                .setStyle(ButtonStyle.Success)
         );
 
     // Update all stored info messages
@@ -1072,6 +1080,347 @@ client.on('interactionCreate', async (interaction) => {
                 const secondRow = new ActionRowBuilder().addComponents(amountInput);
 
                 modal.addComponents(firstRow, secondRow);
+                await interaction.showModal(modal);
+            }
+            
+            if (interaction.customId === 'calculate_coins') {
+                const modal = new ModalBuilder()
+                    .setCustomId('calculate_modal')
+                    .setTitle('💰 Sell Coins');
+
+                const moneyInput = new TextInputBuilder()
+                    .setCustomId('money_input')
+                    .setLabel('How Much Money Do You Want To Spend?')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('100
+        }
+
+        // Handle modal submissions
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'calculate_modal') {
+                const moneyInput = interaction.fields.getTextInputValue('money_input');
+                const cleanMoney = moneyInput.replace(/[^0-9.]/g, '');
+                const moneyAmount = parseFloat(cleanMoney);
+                
+                if (isNaN(moneyAmount) || moneyAmount <= 0) {
+                    return await interaction.reply({
+                        content: '❌ Please enter a valid money amount (e.g., 100)',
+                        ephemeral: true
+                    });
+                }
+                
+                // Calculate coins based on buy rates
+                let coinsFromMoney = 0;
+                
+                // Use the higher rate for smaller amounts, lower rate for larger amounts
+                if (moneyAmount <= 300 * PRICES.buyUnder1B) {
+                    // Small amount, use higher rate
+                    coinsFromMoney = moneyAmount / PRICES.buyUnder1B;
+                } else {
+                    // Large amount, use lower rate  
+                    coinsFromMoney = moneyAmount / PRICES.buyOver1B;
+                }
+                
+                // Format the coin amount nicely
+                let coinDisplay = '';
+                if (coinsFromMoney >= 1000) {
+                    coinDisplay = `${(coinsFromMoney / 1000).toFixed(1)}B`;
+                } else {
+                    coinDisplay = `${Math.round(coinsFromMoney)}M`;
+                }
+                
+                // Send the formatted message like in the image
+                const calculationMessage = `🧮 **David's Coins** Buy and Sell Coins, Exotics, And Skins. See **our-prices** for bulk pricing as well as prices for skins and exotics.\n\nFor ${moneyAmount}, you can buy ${coinDisplay} coins.`;
+                
+                await interaction.reply({
+                    content: calculationMessage,
+                    ephemeral: false
+                });
+                
+                return;
+            }
+            
+            if (interaction.customId === 'price_modal') {
+                const newBuyUnder1B = parseFloat(interaction.fields.getTextInputValue('buy_under_1b_input'));
+                const newBuyOver1B = parseFloat(interaction.fields.getTextInputValue('buy_over_1b_input'));
+                const newSell = parseFloat(interaction.fields.getTextInputValue('sell_input'));
+                
+                // Validate inputs
+                if (isNaN(newBuyUnder1B) || isNaN(newBuyOver1B) || isNaN(newSell)) {
+                    return await interaction.reply({
+                        content: '❌ Invalid price format. Please enter valid numbers (e.g., 0.045)',
+                        ephemeral: true
+                    });
+                }
+                
+                if (newBuyUnder1B <= 0 || newBuyOver1B <= 0 || newSell <= 0) {
+                    return await interaction.reply({
+                        content: '❌ Prices must be greater than 0.',
+                        ephemeral: true
+                    });
+                }
+                
+                // Update prices
+                PRICES.buyUnder1B = newBuyUnder1B;
+                PRICES.buyOver1B = newBuyOver1B;
+                PRICES.sell = newSell;
+                
+                // Update all existing info messages
+                await updateAllInfoMessages(interaction.guild);
+                
+                // Confirmation message
+                const confirmEmbed = new EmbedBuilder()
+                    .setTitle('✅ Prices Updated Successfully')
+                    .setColor(0x00ff00)
+                    .addFields(
+                        { name: 'Buy Under 1B', value: `${PRICES.buyUnder1B}/m (${PRICES.buyUnder1B * 1000} per 1B)`, inline: true },
+                        { name: 'Buy 1B+', value: `${PRICES.buyOver1B}/m (${PRICES.buyOver1B * 1000} per 1B)`, inline: true },
+                        { name: 'Sell Price', value: `${PRICES.sell}/m (${PRICES.sell * 1000} per 1B)`, inline: true }
+                    )
+                    .setFooter({ text: 'All existing price displays have been updated automatically' });
+                    
+                await interaction.reply({ embeds: [confirmEmbed], ephemeral: true });
+                
+                console.log(`Prices updated by ${interaction.user.username}: Buy<1B: ${PRICES.buyUnder1B}, Buy1B+: ${PRICES.buyOver1B}, Sell: ${PRICES.sell}`);
+                return;
+            }
+            
+            if (interaction.customId === 'buy_modal' || interaction.customId === 'sell_modal') {
+                const isBuying = interaction.customId === 'buy_modal';
+                const ign = interaction.fields.getTextInputValue('ign_input');
+                const amount = interaction.fields.getTextInputValue('amount_input');
+
+                // Create ticket channel
+                const guild = interaction.guild;
+                const username = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                const ticketChannel = await guild.channels.create({
+                    name: `ticket-${username}`,
+                    type: ChannelType.GuildText,
+                    parent: CONFIG.TICKET_CATEGORY_ID,
+                    permissionOverwrites: [
+                        {
+                            id: guild.roles.everyone.id,
+                            deny: [PermissionFlagsBits.ViewChannel]
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory
+                            ]
+                        },
+                        {
+                            id: CONFIG.STAFF_ROLE_ID,
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.ManageChannels
+                            ]
+                        }
+                    ]
+                });
+
+                // Add to active tickets
+                activeTickets.set(interaction.user.id, ticketChannel.id);
+                
+                // Initialize message tracking for this ticket
+                ticketMessages.set(ticketChannel.id, []);
+
+                // Calculate price
+                let rate = 0;
+                let totalPrice = 0;
+                
+                if (isBuying) {
+                    const cleanAmount = amount.toLowerCase().replace(/[^0-9.]/g, '');
+                    const numericAmount = parseFloat(cleanAmount);
+                    
+                    if (amount.toLowerCase().includes('b')) {
+                        const amountInM = numericAmount * 1000;
+                        rate = PRICES.buyOver1B;
+                        totalPrice = amountInM * rate;
+                    } else {
+                        if (numericAmount >= 1000) {
+                            rate = PRICES.buyOver1B;
+                        } else if (numericAmount >= 300) {
+                            rate = PRICES.buyUnder1B;
+                        } else {
+                            rate = PRICES.buyUnder1B;
+                        }
+                        totalPrice = numericAmount * rate;
+                    }
+                } else {
+                    const cleanAmount = amount.toLowerCase().replace(/[^0-9.]/g, '');
+                    const numericAmount = parseFloat(cleanAmount);
+                    const amountInM = amount.toLowerCase().includes('b') ? numericAmount * 1000 : numericAmount;
+                    rate = PRICES.sell;
+                    totalPrice = amountInM * rate;
+                }
+
+                const transactionEmbed = new EmbedBuilder()
+                    .setTitle(isBuying ? 'Crypto Purchase' : 'Crypto Sale')
+                    .setColor(0x00ff00)
+                    .setDescription('A Seller will reply shortly!')
+                    .addFields(
+                        { name: 'IGN:', value: ign, inline: true },
+                        { name: `User is ${isBuying ? 'buying' : 'selling'}:`, value: amount, inline: true }
+                    );
+
+                if (totalPrice > 0) {
+                    transactionEmbed.addFields(
+                        { name: 'Cost Details:', value: `You are ${isBuying ? 'buying' : 'selling'} ${amount} coins for ${totalPrice.toFixed(2)} at a rate of ${rate}/m.`, inline: false }
+                    );
+                }
+
+                transactionEmbed.setFooter({ text: `David's Coins | Made by David • Today at ${new Date().toLocaleTimeString()}` });
+
+                // Store ticket info for transcript
+                const ticketInfo = {
+                    ign: ign,
+                    transaction: `${isBuying ? 'Buying' : 'Selling'} ${amount}`,
+                    cost: totalPrice > 0 ? `${totalPrice.toFixed(2)} at ${rate}/m rate` : 'Price not calculated',
+                    user: interaction.user.username,
+                    userId: interaction.user.id
+                };
+
+                // Store ticket info in the channel for later use
+                ticketChannel.ticketInfo = ticketInfo;
+
+                // Close ticket button
+                const closeRow = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('close_ticket')
+                            .setLabel('🔒 Close Ticket')
+                            .setStyle(ButtonStyle.Danger)
+                    );
+
+                await ticketChannel.send(`<@&${CONFIG.STAFF_ROLE_ID}> <@${interaction.user.id}> is ${isBuying ? 'buying' : 'selling'} "${amount}"!`);
+                await ticketChannel.send({ embeds: [transactionEmbed], components: [closeRow] });
+
+                await interaction.reply({
+                    content: `✅ Ticket created successfully! ${ticketChannel}`,
+                    ephemeral: true
+                });
+            }
+        }
+
+        // Handle close ticket button
+        if (interaction.isButton() && interaction.customId === 'close_ticket') {
+            const channel = interaction.channel;
+            const member = interaction.member;
+            
+            if (!member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+                return await interaction.reply({
+                    content: 'Only staff members can close tickets.',
+                    ephemeral: true
+                });
+            }
+            
+            await interaction.reply('Generating transcript and closing ticket in 5 seconds...');
+            
+            // Generate and send transcript
+            try {
+                const transcriptContent = await generateTranscript(
+                    channel.id, 
+                    channel.name,
+                    channel.ticketInfo || {}
+                );
+                
+                // Create transcript file
+                const transcriptBuffer = Buffer.from(transcriptContent, 'utf-8');
+                const attachment = new AttachmentBuilder(transcriptBuffer, { 
+                    name: `transcript-${channel.name}.txt` 
+                });
+                
+                // Send transcript to transcript channel
+                const transcriptChannel = interaction.guild.channels.cache.get(CONFIG.TRANSCRIPT_CHANNEL_ID);
+                if (transcriptChannel) {
+                    const transcriptEmbed = new EmbedBuilder()
+                        .setTitle('📄 Ticket Transcript')
+                        .setDescription(`Transcript for ${channel.name}`)
+                        .addFields(
+                            { name: 'Ticket Channel', value: channel.name, inline: true },
+                            { name: 'Closed By', value: member.user.username, inline: true },
+                            { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                        )
+                        .setColor(0x2ecc71)
+                        .setFooter({ text: 'David\'s Coins | Ticket System' });
+                    
+                    await transcriptChannel.send({ 
+                        embeds: [transcriptEmbed], 
+                        files: [attachment] 
+                    });
+                    
+                    console.log(`Transcript sent to channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} for ticket ${channel.name}`);
+                } else {
+                    console.error(`Transcript channel ${CONFIG.TRANSCRIPT_CHANNEL_ID} not found!`);
+                }
+            } catch (error) {
+                console.error('Error generating transcript:', error);
+            }
+            
+            // Remove from active tickets
+            for (const [userId, channelId] of activeTickets) {
+                if (channelId === channel.id) {
+                    activeTickets.delete(userId);
+                    break;
+                }
+            }
+            
+            // Clean up message tracking
+            ticketMessages.delete(channel.id);
+
+            setTimeout(async () => {
+                try {
+                    await channel.delete();
+                } catch (error) {
+                    console.error('Error deleting channel:', error);
+                }
+            }, 5000);
+        }
+
+    } catch (error) {
+        console.error('Error handling interaction:', error);
+        
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: 'Something went wrong. Please try again.',
+                    ephemeral: true
+                });
+            }
+        } catch (replyError) {
+            console.error('Error sending error response:', replyError);
+        }
+    }
+});
+
+// Error handling
+client.on('error', (error) => {
+    console.error('Discord client error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+// Login to Discord
+console.log('🚀 Starting bot...');
+client.login(CONFIG.TOKEN).then(() => {
+    console.log('✅ Bot login successful!');
+}).catch((error) => {
+    console.error('❌ Bot login failed:', error);
+    process.exit(1);
+});)
+                    .setMaxLength(10);
+
+                const firstRow = new ActionRowBuilder().addComponents(moneyInput);
+                modal.addComponents(firstRow);
+                
                 await interaction.showModal(modal);
             }
         }
