@@ -206,8 +206,8 @@ client.on('messageCreate', async (message) => {
     }
     
     // Server commands below (existing code)
-    // Check if user has staff role for most commands
-    const isStaff = message.member && message.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
+    // Check if user is the bot owner
+    const isOwner = message.author.id === CONFIG.OWNER_USER_ID;
     
     // !crypto - Available to everyone
     if (message.content === '!crypto') {
@@ -273,15 +273,45 @@ client.on('messageCreate', async (message) => {
         return;
     }
     
-    // All other commands - Staff only
-    if (!isStaff) {
-        // If not staff and they try any other ! command, ignore it
+    // !help - Available to everyone
+    if (message.content === '!help') {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle("📚 Available Commands")
+            .setColor(0x7289da)
+            .setDescription("Here are all the available commands for **David's Coins**:")
+            .addFields(
+                {
+                    name: "🪙 **!crypto**",
+                    value: "Display cryptocurrency wallet addresses for payments",
+                    inline: false
+                },
+                {
+                    name: "📚 **!help**",
+                    value: "Show this help menu with all available commands",
+                    inline: false
+                }
+            )
+            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
+
+        await message.reply({ embeds: [helpEmbed] });
+        
+        try {
+            await message.delete();
+        } catch (error) {
+            console.error('Could not delete message:', error);
+        }
+        return;
+    }
+    
+    // Owner-only commands below
+    if (!isOwner) {
+        // If not owner and they try any other ! command, ignore it
         if (message.content.startsWith('!')) {
             return;
         }
     }
     
-    // Staff-only commands below
+    // Owner-only commands
     if (message.content === '!info') {
         const embed = new EmbedBuilder()
             .setTitle("David's Coins")
@@ -484,69 +514,6 @@ client.on('messageCreate', async (message) => {
             .setFooter({ text: "David's Coins • Secure & Professional Trading • All transactions are final" });
 
         await message.reply({ embeds: [paymentsEmbed] });
-        
-        try {
-            await message.delete();
-        } catch (error) {
-            console.error('Could not delete message:', error);
-        }
-    }
-    
-    if (message.content === '!help') {
-        const helpEmbed = new EmbedBuilder()
-            .setTitle("📚 Available Commands")
-            .setColor(0x7289da)
-            .setDescription("Here are all the available commands for **David's Coins**:")
-            .addFields(
-                {
-                    name: "🛒 **!info**",
-                    value: "View shop information, prices, and payment methods with Buy/Sell buttons",
-                    inline: false
-                },
-                {
-                    name: "📋 **!rules**",
-                    value: "Display server rules and guidelines for a safe trading environment",
-                    inline: false
-                },
-                {
-                    name: "📜 **!tos**",
-                    value: "View our Terms of Service and important legal information",
-                    inline: false
-                },
-                {
-                    name: "💳 **!payments**",
-                    value: "View accepted payment methods and transaction information",
-                    inline: false
-                },
-                {
-                    name: "🪙 **!crypto**",
-                    value: "Display cryptocurrency wallet addresses for payments",
-                    inline: false
-                },
-                {
-                    name: "✅ **!verify**",
-                    value: "Verify yourself to gain access to the server (react with ✅)",
-                    inline: false
-                },
-                {
-                    name: "📚 **!help**",
-                    value: "Show this help menu with all available commands",
-                    inline: false
-                },
-                {
-                    name: "🔒 **!close**",
-                    value: "Close a ticket (staff only, must be used in ticket channels)",
-                    inline: false
-                },
-                {
-                    name: "💰 **!price**",
-                    value: "Update coin prices (staff only, updates all existing price displays)",
-                    inline: false
-                }
-            )
-            .setFooter({ text: "David's Coins • Professional Skyblock Trading" });
-
-        await message.reply({ embeds: [helpEmbed] });
         
         try {
             await message.delete();
@@ -973,10 +940,10 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.isButton()) {
             // Handle price modal button
             if (interaction.customId === 'open_price_modal') {
-                // Check if user has staff role
-                if (!interaction.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+                // Check if user is the bot owner
+                if (interaction.user.id !== CONFIG.OWNER_USER_ID) {
                     return await interaction.reply({
-                        content: 'Only staff members can update prices.',
+                        content: 'Only the bot owner can update prices.',
                         ephemeral: true
                     });
                 }
@@ -1331,9 +1298,10 @@ client.on('interactionCreate', async (interaction) => {
             const channel = interaction.channel;
             const member = interaction.member;
             
-            if (!member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+            // Check if user is the bot owner
+            if (interaction.user.id !== CONFIG.OWNER_USER_ID) {
                 return await interaction.reply({
-                    content: 'Only staff members can close tickets.',
+                    content: 'Only the bot owner can close tickets.',
                     ephemeral: true
                 });
             }
