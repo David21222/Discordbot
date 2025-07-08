@@ -1104,7 +1104,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setLabel('How Much Money Do You Want To Spend?')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setPlaceholder('100
+                    .setPlaceholder('100$')
         }
 
         // Handle modal submissions
