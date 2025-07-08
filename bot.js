@@ -1055,31 +1055,42 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 const isBuying = interaction.customId === 'buy_coins';
-                const action = isBuying ? 'Buy Coins for Crypto!' : 'Sell Coins for Crypto!';
+                const action = isBuying ? '🪙 Buy Coins' : '🪙 Sell Coins';
                 
                 const modal = new ModalBuilder()
                     .setCustomId(isBuying ? 'buy_modal' : 'sell_modal')
                     .setTitle(action);
 
-                const ignInput = new TextInputBuilder()
-                    .setCustomId('ign_input')
-                    .setLabel('What\'s The Ign?')
+                const amountInput = new TextInputBuilder()
+                    .setCustomId('amount_input')
+                    .setLabel('Amount Of Coins')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
+                    .setPlaceholder('1b')
+                    .setMaxLength(15);
+
+                const paymentInput = new TextInputBuilder()
+                    .setCustomId('payment_input')
+                    .setLabel('Payment Method')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('PayPal')
+                    .setMaxLength(50);
+
+                const usernameInput = new TextInputBuilder()
+                    .setCustomId('username_input')
+                    .setLabel('Minecraft Username')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('56ms')
                     .setMinLength(3)
                     .setMaxLength(16);
 
-                const amountInput = new TextInputBuilder()
-                    .setCustomId('amount_input')
-                    .setLabel(isBuying ? 'How Much Do You Want To Buy?' : 'How Much Do You Want To Sell?')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(15);
+                const firstRow = new ActionRowBuilder().addComponents(amountInput);
+                const secondRow = new ActionRowBuilder().addComponents(paymentInput);
+                const thirdRow = new ActionRowBuilder().addComponents(usernameInput);
 
-                const firstRow = new ActionRowBuilder().addComponents(ignInput);
-                const secondRow = new ActionRowBuilder().addComponents(amountInput);
-
-                modal.addComponents(firstRow, secondRow);
+                modal.addComponents(firstRow, secondRow, thirdRow);
                 await interaction.showModal(modal);
             }
             
