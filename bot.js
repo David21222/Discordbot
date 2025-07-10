@@ -1,4 +1,18 @@
-// Create a temporary interaction to show the modal
+const sellInput = new TextInputBuilder()
+            .setCustomId('sell_input')
+            .setLabel('Sell Price (per million)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(PRICES.sell.toString())
+            .setPlaceholder('e.g., 0.012');
+
+        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
+        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
+        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+
+        modal.addComponents(firstRow, secondRow, thirdRow);
+        
+        // Create a temporary interaction to show the modal
         const tempMessage = await message.reply('Opening price update modal...');
         
         // Since we can't directly show modal from message, we'll create an interaction
@@ -430,7 +444,7 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.customId === 'calculate_coins') {
                 const modal = new ModalBuilder()
                     .setCustomId('calculate_modal')
-                    .setTitle('💰 Sell Coins');
+                    .setTitle('💰 Calculate Coins');
 
                 const moneyInput = new TextInputBuilder()
                     .setCustomId('money_input')
@@ -1092,22 +1106,7 @@ client.on('messageCreate', async (message) => {
 
         const sellInput = new TextInputBuilder()
             .setCustomId('sell_input')
-            .setLabel('Sell Price (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.sell.toString())
-            .setPlaceholder('e.g., 0.012');
-
-        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
-        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
-        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
-
-        modal.addComponents(firstRow, secondRow, thirdRow);
-        
-        // Create a temporary interaction to show the modal
-        const tempMessage = await message.reply('Opening price update modal...');
-        
-        //)
+            )
                     .setMaxLength(10);
 
                 const firstRow = new ActionRowBuilder().addComponents(moneyInput);
@@ -2096,19 +2095,3 @@ client.on('messageCreate', async (message) => {
 
         const sellInput = new TextInputBuilder()
             .setCustomId('sell_input')
-            .setLabel('Sell Price (per million)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(PRICES.sell.toString())
-            .setPlaceholder('e.g., 0.012');
-
-        const firstRow = new ActionRowBuilder().addComponents(buyUnder1BInput);
-        const secondRow = new ActionRowBuilder().addComponents(buyOver1BInput);
-        const thirdRow = new ActionRowBuilder().addComponents(sellInput);
-
-        modal.addComponents(firstRow, secondRow, thirdRow);
-        
-        // Create a temporary interaction to show the modal
-        const tempMessage = await message.reply('Opening price update modal...');
-        
-        //
