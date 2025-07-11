@@ -59,6 +59,9 @@ const botStats = {
 // Ticket message tracking
 const ticketMessages = new Map();
 
+// Track active tickets per user
+const activeTickets = new Map(); // userId -> channelId
+
 // Helper functions
 function safeDeleteMessage(message) {
     try {
@@ -814,6 +817,13 @@ client.on('interactionCreate', async (interaction) => {
                         
                         // Clear ticket messages from memory and delete channel
                         ticketMessages.delete(channel.id);
+                        // Remove user from active tickets tracking
+                        for (const [userId, channelId] of activeTickets.entries()) {
+                            if (channelId === channel.id) {
+                                activeTickets.delete(userId);
+                                break;
+                            }
+                        }
                         await channel.delete();
                     } catch (error) {
                         console.error('Error generating transcript or deleting channel:', error);
@@ -835,6 +845,23 @@ client.on('interactionCreate', async (interaction) => {
                 const amount = interaction.fields.getTextInputValue('amount');
                 const paymentMethod = interaction.fields.getTextInputValue('payment_method');
                 const minecraftUsername = interaction.fields.getTextInputValue('minecraft_username');
+                
+                // Check if user already has an active ticket
+                if (activeTickets.has(interaction.user.id)) {
+                    const existingChannelId = activeTickets.get(interaction.user.id);
+                    const existingChannel = interaction.guild.channels.cache.get(existingChannelId);
+                    
+                    if (existingChannel) {
+                        await safeReply(interaction, {
+                            content: `❌ You already have an active ticket: ${existingChannel}. Please close your current ticket before opening a new one.`,
+                            ephemeral: true
+                        });
+                        return;
+                    } else {
+                        // Channel doesn't exist anymore, remove from tracking
+                        activeTickets.delete(interaction.user.id);
+                    }
+                }
                 
                 // Parse amount
                 const parsedAmount = parseAmount(amount);
@@ -876,6 +903,9 @@ client.on('interactionCreate', async (interaction) => {
                             }
                         ]
                     });
+                    
+                    // Add user to active tickets tracking
+                    activeTickets.set(interaction.user.id, ticketChannel.id);
                     
                     // Create ticket embed
                     const ticketEmbed = new EmbedBuilder()
