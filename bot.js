@@ -84,9 +84,19 @@ function safeReply(interaction, content) {
 
 function formatNumber(num) {
     if (num >= 1000000000) {
-        return (num / 1000000000).toFixed(1) + 'B';
+        const billions = num / 1000000000;
+        if (billions === Math.floor(billions)) {
+            return billions + 'B';
+        } else {
+            return billions.toFixed(1) + 'B';
+        }
     } else if (num >= 1000000) {
-        return (num / 1000000).toFixed(0) + 'M';
+        const millions = num / 1000000;
+        if (millions === Math.floor(millions)) {
+            return millions + 'M';
+        } else {
+            return millions.toFixed(0) + 'M';
+        }
     }
     return num.toString();
 }
@@ -183,16 +193,20 @@ function createCryptoEmbed() {
 function createRulesEmbed() {
     return new EmbedBuilder()
         .setTitle('📋 Server Rules')
-        .setDescription('**Please follow these rules to maintain a safe trading environment:**\n\n' +
-            '1. **Be respectful** - Treat all members with respect\n' +
-            '2. **No spam** - Keep messages relevant and avoid excessive posting\n' +
-            '3. **No scamming** - Any scamming attempts will result in immediate ban\n' +
-            '4. **Use tickets** - All trading must be done through our ticket system\n' +
-            '5. **English only** - Please communicate in English for staff assistance\n' +
-            '6. **No advertising** - Don\'t promote other services or Discord servers\n' +
-            '7. **Follow Discord TOS** - All Discord Terms of Service apply\n' +
-            '8. **Staff decisions final** - Respect staff decisions and rulings\n\n' +
-            '**Violation of these rules may result in warnings, mutes, or bans.**')
+        .setDescription('**Please follow these rules to ensure a safe and professional trading environment:**\n\n' +
+            '**1. Have basic human decency**\n' +
+            'Treat all members with respect and courtesy.\n\n' +
+            '**2. Don\'t advertise in chat or in DMs**\n' +
+            'No promotion of other services or unsolicited messages.\n\n' +
+            '**3. Don\'t attempt to scam**\n' +
+            'Any fraudulent activity will result in immediate ban.\n\n' +
+            '**4. Don\'t spam the ticket system**\n' +
+            'Only create tickets for legitimate transactions.\n\n' +
+            '**5. Don\'t leak other players\' IGNs**\n' +
+            'Respect privacy and keep player information confidential.\n\n' +
+            '**6. Communicate through English**\n' +
+            'All communication must be in English for clarity.\n\n' +
+            'Violation of these rules may result in warnings, mutes, or permanent bans.')
         .setColor('#ff0000')
         .setFooter({ text: 'Thank you for helping keep our community safe!' });
 }
@@ -200,20 +214,24 @@ function createRulesEmbed() {
 function createTOSEmbed() {
     return new EmbedBuilder()
         .setTitle('📜 Terms of Service')
-        .setDescription('**By using David\'s Coins services, you agree to:**\n\n' +
-            '• **Age requirement:** Must be 13+ to use our services\n' +
-            '• **Payment:** Payment must be sent before coins are delivered\n' +
-            '• **Delivery:** Coins delivered within 24 hours of payment\n' +
-            '• **Refunds:** No refunds after coins are delivered\n' +
-            '• **Chargebacks:** Chargebacks will result in permanent ban\n' +
-            '• **Account safety:** We are not responsible for account bans\n' +
-            '• **Price changes:** Prices may change without notice\n' +
-            '• **Disputes:** Contact staff immediately for any issues\n\n' +
-            '**Important Notes:**\n' +
-            '• All transactions are final once completed\n' +
-            '• We reserve the right to refuse service\n' +
-            '• Terms may be updated at any time\n' +
-            '• By trading, you accept all risks involved')
+        .setDescription('Once you join David\'s Coins, you\'re automatically agreeing to the following terms:\n\n' +
+            '**1. No Refunds**\n' +
+            'There are no refunds once the transaction has taken place.\n\n' +
+            '**2. Chargeback Policy**\n' +
+            'Any and all chargebacks will result in a permanent ban from our discord server.\n\n' +
+            '**3. Payment Verification**\n' +
+            'By purchasing any goods from us you acknowledge that the money is totally yours.\n\n' +
+            '**4. Ban Rights**\n' +
+            'We reserve the right to ban anyone from our discord server at any point in time for any reason, any paid for and not received items will get refunded.\n\n' +
+            '**5. Service Refusal**\n' +
+            'We reserve the right to refuse service to anyone at anytime.\n\n' +
+            '**6. Server Protection**\n' +
+            'If any damage is caused onto our server by you, we reserve the right to ban you without a refund.\n\n' +
+            '**7. Terms Changes**\n' +
+            'These terms are subject to change at any time without notice to the client.\n\n' +
+            '**8. Price Changes**\n' +
+            'We reserve the right to change the price of our products at any time we want.\n\n' +
+            'By using our services, you agree to these terms and conditions.')
         .setColor('#0099ff')
         .setFooter({ text: 'David\'s Coins - Professional Trading Service' });
 }
@@ -221,24 +239,20 @@ function createTOSEmbed() {
 function createPaymentsEmbed() {
     return new EmbedBuilder()
         .setTitle('💳 Payment Methods')
-        .setDescription('**We accept the following payment methods:**\n\n' +
-            '**💰 PayPal**\n' +
-            '• Most popular payment method\n' +
-            '• Instant processing\n' +
-            '• Send as Friends & Family\n\n' +
-            '**🔗 Cryptocurrency**\n' +
-            '• Bitcoin (BTC)\n' +
-            '• Ethereum (ETH)\n' +
-            '• Litecoin (LTC)\n' +
-            '• Tether (USDT)\n' +
-            '• Use `!crypto` for wallet addresses\n\n' +
-            '**📱 Mobile Payments**\n' +
-            '• Venmo\n' +
-            '• CashApp\n\n' +
-            '**Important:**\n' +
-            '• Payment must be sent before delivery\n' +
-            '• Include your Discord username in payment notes\n' +
-            '• Contact staff if you need help with payments')
+        .setDescription('David\'s Coins accepts the following secure payment methods for all transactions:\n\n' +
+            '**🪙 Primary Cryptocurrencies**\n' +
+            '🔸 **Bitcoin (BTC)**\n' +
+            '🔹 **Ethereum (ETH)**\n' +
+            '🟠 **Litecoin (LTC)**\n' +
+            '🟢 **Tether (USDT)**\n\n' +
+            '**⚡ Why Cryptocurrency?**\n' +
+            '• **Fast transactions** - Nearly instant transfers\n' +
+            '• **Low fees** - Minimal processing costs\n' +
+            '• **Secure** - Blockchain-verified transactions\n' +
+            '• **Global** - Available worldwide 24/7\n\n' +
+            '**Additional Payment Options**\n' +
+            'We may accept other payment methods on a case-by-case basis. Please contact our staff through a ticket to discuss alternative payment arrangements.\n\n' +
+            'David\'s Coins • Secure & Professional Trading • All transactions are final')
         .setColor('#00ff00')
         .setFooter({ text: 'All payments are processed securely' });
 }
@@ -533,43 +547,26 @@ client.on('messageCreate', async (message) => {
                 break;
             
             case 'price':
-                const priceModal = new ModalBuilder()
-                    .setCustomId('update_prices')
-                    .setTitle('Update Prices');
+                const priceUpdateEmbed = new EmbedBuilder()
+                    .setTitle('💰 Update Prices')
+                    .setDescription('**Current Prices:**\n' +
+                        `• Buy Under 1B: ${prices.buyUnder1B}/M\n` +
+                        `• Buy Over 1B: ${prices.buyOver1B}/M\n` +
+                        `• Sell Price: ${prices.sell}/M\n\n` +
+                        'Click the button below to update prices.')
+                    .setColor('#0099ff');
                 
-                const under1bInput = new TextInputBuilder()
-                    .setCustomId('under1b_price')
-                    .setLabel('Buy Under 1B Price (per million)')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('0.04')
-                    .setValue(prices.buyUnder1B.toString())
-                    .setRequired(true);
+                const updatePriceButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('open_price_modal')
+                            .setLabel('Update Prices')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('💰')
+                    );
                 
-                const over1bInput = new TextInputBuilder()
-                    .setCustomId('over1b_price')
-                    .setLabel('Buy Over 1B Price (per million)')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('0.035')
-                    .setValue(prices.buyOver1B.toString())
-                    .setRequired(true);
-                
-                const sellInput = new TextInputBuilder()
-                    .setCustomId('sell_price')
-                    .setLabel('Sell Price (per million)')
-                    .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('0.018')
-                    .setValue(prices.sell.toString())
-                    .setRequired(true);
-                
-                const firstRow = new ActionRowBuilder().addComponents(under1bInput);
-                const secondRow = new ActionRowBuilder().addComponents(over1bInput);
-                const thirdRow = new ActionRowBuilder().addComponents(sellInput);
-                
-                priceModal.addComponents(firstRow, secondRow, thirdRow);
-                
-                // Create a temporary interaction to show the modal
-                const tempMessage = await message.channel.send('Opening price update modal...');
-                setTimeout(() => safeDeleteMessage(tempMessage), 1000);
+                await message.channel.send({ embeds: [priceUpdateEmbed], components: [updatePriceButton] });
+                botStats.messagesSent++;
                 break;
             
             default:
@@ -660,6 +657,54 @@ client.on('interactionCreate', async (interaction) => {
                 modal.addComponents(firstRow);
                 
                 await interaction.showModal(modal);
+                return;
+            }
+            
+            // Price update button
+            if (interaction.customId === 'open_price_modal') {
+                if (!hasStaffRole(member)) {
+                    await safeReply(interaction, {
+                        content: '❌ Only staff members can update prices.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const priceModal = new ModalBuilder()
+                    .setCustomId('update_prices')
+                    .setTitle('Update Prices');
+                
+                const under1bInput = new TextInputBuilder()
+                    .setCustomId('under1b_price')
+                    .setLabel('Buy Under 1B Price (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('0.04')
+                    .setValue(prices.buyUnder1B.toString())
+                    .setRequired(true);
+                
+                const over1bInput = new TextInputBuilder()
+                    .setCustomId('over1b_price')
+                    .setLabel('Buy Over 1B Price (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('0.035')
+                    .setValue(prices.buyOver1B.toString())
+                    .setRequired(true);
+                
+                const sellInput = new TextInputBuilder()
+                    .setCustomId('sell_price')
+                    .setLabel('Sell Price (per million)')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('0.018')
+                    .setValue(prices.sell.toString())
+                    .setRequired(true);
+                
+                const firstRow = new ActionRowBuilder().addComponents(under1bInput);
+                const secondRow = new ActionRowBuilder().addComponents(over1bInput);
+                const thirdRow = new ActionRowBuilder().addComponents(sellInput);
+                
+                priceModal.addComponents(firstRow, secondRow, thirdRow);
+                
+                await interaction.showModal(priceModal);
                 return;
             }
             
