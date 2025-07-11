@@ -232,10 +232,10 @@ function createPaymentsEmbed() {
         .setTitle('💳 Payment Methods')
         .setDescription('David\'s Coins accepts the following secure payment methods for all transactions:\n\n' +
             '**🪙 Primary Cryptocurrencies**\n' +
-            '🔸 **Bitcoin (BTC)**\n' +
-            '🔹 **Ethereum (ETH)**\n' +
-            '🟠 **Litecoin (LTC)**\n' +
-            '🟢 **Tether (USDT)**\n\n' +
+            '<:BTC:1387494854497669242> **Bitcoin (BTC)**\n' +
+            '<:ETH:1387494868531675226> **Ethereum (ETH)**\n' +
+            '<:LTC:1387494812269412372> **Litecoin (LTC)**\n' +
+            '<:USDT:1387494839855218798> **Tether (USDT)**\n\n' +
             '**⚡ Why Cryptocurrency?**\n' +
             '• **Fast transactions** - Nearly instant transfers\n' +
             '• **Low fees** - Minimal processing costs\n' +
@@ -292,8 +292,10 @@ client.on('messageCreate', async (message) => {
         }
         ticketMessages.get(message.channel.id).push({
             author: message.author.username,
-            content: message.content,
-            timestamp: new Date().toISOString()
+            content: message.content || '[No text content]',
+            timestamp: new Date().toISOString(),
+            authorId: message.author.id,
+            messageId: message.id
         });
     }
     
@@ -613,9 +615,9 @@ client.on('interactionCreate', async (interaction) => {
                 
                 const usernameInput = new TextInputBuilder()
                     .setCustomId('minecraft_username')
-                    .setLabel('Minecraft username')
+                    .setLabel('IGN')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('Your Minecraft username')
+                    .setPlaceholder('Your Minecraft IGN')
                     .setRequired(true);
                 
                 const firstRow = new ActionRowBuilder().addComponents(amountInput);
@@ -716,17 +718,110 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 
                 await safeReply(interaction, {
-                    content: '🔒 Closing ticket in 5 seconds...',
+                    content: '🔒 Generating transcript and closing ticket in 5 seconds...',
                     ephemeral: true
                 });
                 
                 setTimeout(async () => {
                     try {
-                        // Clear ticket messages from memory
+                        // Generate transcript
+                        const messages = ticketMessages.get(channel.id) || [];
+                        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+                        
+                        if (transcriptChannel && messages.length > 0) {
+                            // Extract ticket info from first message (the embed)
+                            const firstMessage = messages[0];
+                            const ticketInfo = firstMessage.embed;
+                            const ticketName = channel.name;
+                            const createdTime = new Date(channel.createdTimestamp).toLocaleString();
+                            const closedTime = new Date().toLocaleString();
+                            const closedBy = interaction.user.username;
+                            
+                            // Extract IGN from ticket info
+                            let ign = 'Unknown';
+                            let transactionType = 'Unknown';
+                            let cost = 'Unknown';
+                            let rate = 'Unknown';
+                            
+                            if (ticketInfo && ticketInfo.description) {
+                                const ignMatch = ticketInfo.description.match(/\*\*IGN:\*\* (.+)/);
+                                const typeMatch = ticketInfo.description.match(/\*\*Type:\*\* (.+)/);
+                                const priceMatch = ticketInfo.description.match(/\*\*Price:\*\* \$(.+) USD/);
+                                const rateMatch = ticketInfo.description.match(/\*\*Rate Used:\*\* \$(.+)\/M/);
+                                
+                                if (ignMatch) ign = ignMatch[1];
+                                if (typeMatch) transactionType = typeMatch[1];
+                                if (priceMatch) cost = `${priceMatch[1]} at ${rateMatch ? rateMatch[1] : 'unknown'}/M rate`;
+                            }
+                            
+                            // Create transcript header
+                            let transcriptText = `TICKET TRANSCRIPT - ${ticketName}\n`;
+                            transcriptText += `Created: ${createdTime}\n`;
+                            transcriptText += `Ticket Channel ID: ${channel.id}\n`;
+                            transcriptText += `Total Messages: ${messages.length}\n\n`;
+                            transcriptText += `IGN: ${ign}\n`;
+                            transcriptText += `Transaction: ${transactionType}\n`;
+                            transcriptText += `Cost: ${cost}\n`;
+                            transcriptText += `Customer: ${ticketInfo?.description?.match(/\*\*Customer:\*\* (.+)/)?.[1] || 'Unknown'}\n\n`;
+                            transcriptText += `--- CONVERSATION ---\n\n`;
+                            
+                            // Add all messages to transcript
+                            messages.forEach((msg, index) => {
+                                const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+                                transcriptText += `[${timestamp}] ${msg.author}: `;
+                                
+                                if (msg.embed) {
+                                    transcriptText += `[No text content]\n`;
+                                    transcriptText += `    [EMBED] Title: ${msg.embed.title || 'Crypto Purchase'}\n`;
+                                    transcriptText += `    [EMBED] Description: ${msg.embed.description ? 'A Seller will reply shortly!' : ''}\n`;
+                                    transcriptText += `    [EMBED] IGN: ${ign}\n`;
+                                    transcriptText += `    [EMBED] User is ${transactionType.toLowerCase()}: ${ticketInfo?.description?.match(/\*\*Amount:\*\* (.+) coins/)?.[1] || 'Unknown'}\n`;
+                                    transcriptText += `    [EMBED] Cost Details: You are ${transactionType.toLowerCase()} ${ticketInfo?.description?.match(/\*\*Amount:\*\* (.+) coins/)?.[1] || 'Unknown'} coins for ${cost}.\n\n`;
+                                } else {
+                                    transcriptText += `${msg.content}\n\n`;
+                                }
+                            });
+                            
+                            transcriptText += `[${new Date().toLocaleTimeString()}] David's Coins [BOT]: Generating transcript and closing ticket in 5 seconds...\n\n`;
+                            transcriptText += `--- END TRANSCRIPT ---\n`;
+                            transcriptText += `Transcript generated on: ${closedTime}\n`;
+                            transcriptText += `David's Coins | Ticket System\n`;
+                            
+                            // Send transcript embed
+                            const transcriptEmbed = new EmbedBuilder()
+                                .setTitle('📄 Ticket Transcript')
+                                .setDescription(`Transcript for ${ticketName}`)
+                                .addFields(
+                                    { name: 'Ticket Channel', value: ticketName, inline: true },
+                                    { name: 'Closed By', value: closedBy, inline: true },
+                                    { name: 'Closed At', value: closedTime, inline: true }
+                                )
+                                .setColor('#0099ff')
+                                .setFooter({ text: 'David\'s Coins | Ticket System' });
+                            
+                            // Send transcript as file
+                            const buffer = Buffer.from(transcriptText, 'utf-8');
+                            const attachment = {
+                                attachment: buffer,
+                                name: `transcript-${ticketName}.txt`
+                            };
+                            
+                            await transcriptChannel.send({
+                                embeds: [transcriptEmbed],
+                                files: [attachment]
+                            });
+                        }
+                        
+                        // Clear ticket messages from memory and delete channel
                         ticketMessages.delete(channel.id);
                         await channel.delete();
                     } catch (error) {
-                        console.error('Error deleting ticket channel:', error);
+                        console.error('Error generating transcript or deleting channel:', error);
+                        try {
+                            await channel.delete();
+                        } catch (deleteError) {
+                            console.error('Error deleting ticket channel:', deleteError);
+                        }
                     }
                 }, 5000);
                 return;
@@ -815,8 +910,13 @@ client.on('interactionCreate', async (interaction) => {
                         components: [closeButton]
                     });
                     
-                    // Initialize ticket message tracking
-                    ticketMessages.set(ticketChannel.id, []);
+                    // Initialize ticket message tracking with initial ticket info
+                    ticketMessages.set(ticketChannel.id, [{
+                        author: 'David\'s Coins [BOT]',
+                        content: `<@${interaction.user.id}> <@&${STAFF_ROLE_ID}> is ${type === 'buy' ? 'buying' : 'selling'} "${formattedAmount}"!`,
+                        timestamp: new Date().toISOString(),
+                        embed: ticketEmbed.toJSON()
+                    }]);
                     botStats.ticketsCreated++;
                     botStats.messagesSent++;
                     
