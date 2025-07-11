@@ -46,7 +46,7 @@ const EMOJIS = {
 let prices = {
     buyUnder1B: 0.04,
     buyOver1B: 0.035,
-    sell: 0.018
+    sell: 0.02
 };
 
 // Bot statistics
@@ -367,7 +367,7 @@ client.on('messageCreate', async (message) => {
                 
                 case 'setprice':
                     if (args.length !== 4) {
-                        await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.04 0.035 0.018`');
+                        await message.reply('❌ Usage: `!setprice <under1b> <over1b> <sell>`\nExample: `!setprice 0.04 0.035 0.02`');
                         return;
                     }
                     
