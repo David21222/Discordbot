@@ -156,12 +156,12 @@ function createInfoEmbed() {
     return new EmbedBuilder()
         .setTitle('David\'s Coins')
         .setDescription('**Coins Buy Prices:**\n' +
-            `• 0.04/m for 300m-1b (40 per 1B)\n` +
-            `• 0.035/m for 1b+ (35 per 1B)\n\n` +
+            `• 0.04/M for 300M-1B (40 per 1B)\n` +
+            `• 0.035/M for 1B+ (35 per 1B)\n\n` +
             '**Coins Sell Prices:**\n' +
-            `• 0.02/m for 1b+ (20 per 1B)\n\n` +
+            `• 0.02/M for 1B+ (20 per 1B)\n\n` +
             '**Payment Methods:**\n' +
-            '🔸🔹🟠🟢')
+            '<:LTC:1387494812269412372><:BTC:1387494854497669242><:ETH:1387494868531675226><:USDT:1387494839855218798>')
         .setColor('#0099ff');
 }
 
@@ -685,7 +685,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setCustomId('sell_price')
                     .setLabel('Sell Price (per million)')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('0.018')
+                    .setPlaceholder('0.02')
                     .setValue(prices.sell.toString())
                     .setRequired(true);
                 
