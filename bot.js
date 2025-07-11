@@ -154,24 +154,15 @@ function hasStaffRole(member) {
 
 function createInfoEmbed() {
     return new EmbedBuilder()
-        .setTitle('💰 David\'s Coins - Minecraft Skyblock Coin Trading')
-        .setDescription('**Professional Minecraft Skyblock coin trading service**\n\n' +
-            '**Current Pricing:**\n' +
-            `• Buy Under 1B: $${prices.buyUnder1B}/M (${prices.buyUnder1B * 1000}/B)\n` +
-            `• Buy Over 1B: $${prices.buyOver1B}/M (${prices.buyOver1B * 1000}/B)\n` +
-            `• Sell Price: $${prices.sell}/M (${prices.sell * 1000}/B)\n\n` +
-            '**How to Trade:**\n' +
-            '• Click **Buy** to purchase coins\n' +
-            '• Click **Sell** to sell your coins\n' +
-            '• Click **Calculate** to estimate prices\n\n' +
+        .setTitle('David\'s Coins')
+        .setDescription('**Coins Buy Prices:**\n' +
+            `• 0.04/m for 300m-1b (40 per 1B)\n` +
+            `• 0.035/m for 1b+ (35 per 1B)\n\n` +
+            '**Coins Sell Prices:**\n' +
+            `• 0.02/m for 1b+ (20 per 1B)\n\n` +
             '**Payment Methods:**\n' +
-            '• PayPal\n' +
-            '• Cryptocurrency (BTC, ETH, LTC, USDT)\n' +
-            '• Venmo\n' +
-            '• CashApp')
-        .setColor('#00ff00')
-        .setThumbnail('https://cdn.discordapp.com/attachments/1384686509780897805/1387493294125281401/image.png')
-        .setFooter({ text: 'David\'s Coins - Trusted Skyblock Trading' });
+            '🔸🔹🟠🟢')
+        .setColor('#0099ff');
 }
 
 function createCryptoEmbed() {
@@ -462,15 +453,15 @@ client.on('messageCreate', async (message) => {
                 const infoButtons = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
-                            .setCustomId('buy_coins')
-                            .setLabel('Buy Coins')
-                            .setStyle(ButtonStyle.Success)
-                            .setEmoji('💰'),
-                        new ButtonBuilder()
                             .setCustomId('sell_coins')
                             .setLabel('Sell Coins')
                             .setStyle(ButtonStyle.Danger)
                             .setEmoji('💸'),
+                        new ButtonBuilder()
+                            .setCustomId('buy_coins')
+                            .setLabel('Buy Coins')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('💰'),
                         new ButtonBuilder()
                             .setCustomId('calculate_price')
                             .setLabel('Calculate')
@@ -613,7 +604,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setCustomId('amount')
                     .setLabel('Amount of coins')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('e.g., 500M, 1.5B, 2000000000')
+                    .setPlaceholder('e.g., 300M, 500M, 1.5B')
                     .setRequired(true);
                 
                 const paymentInput = new TextInputBuilder()
