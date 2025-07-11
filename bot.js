@@ -582,7 +582,7 @@ client.on('interactionCreate', async (interaction) => {
                 const wallet = CRYPTO_WALLETS[cryptoType];
                 
                 await safeReply(interaction, {
-                    content: `📋 **${cryptoType} Wallet Address:**\n\`\`\`${wallet}\`\`\`\n*Address copied to clipboard!*`,
+                    content: `📋 **${cryptoType} Wallet Address:**\n\`${wallet}\`\n\n*Select and copy the address above!*`,
                     ephemeral: true
                 });
                 return;
