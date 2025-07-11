@@ -453,20 +453,17 @@ client.on('messageCreate', async (message) => {
                 const infoButtons = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
-                            .setCustomId('sell_coins')
-                            .setLabel('Sell Coins')
-                            .setStyle(ButtonStyle.Danger)
-                            .setEmoji('💸'),
-                        new ButtonBuilder()
                             .setCustomId('buy_coins')
-                            .setLabel('Buy Coins')
-                            .setStyle(ButtonStyle.Success)
-                            .setEmoji('💰'),
+                            .setLabel('Buy')
+                            .setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder()
+                            .setCustomId('sell_coins')
+                            .setLabel('Sell')
+                            .setStyle(ButtonStyle.Danger),
                         new ButtonBuilder()
                             .setCustomId('calculate_price')
                             .setLabel('Calculate')
-                            .setStyle(ButtonStyle.Primary)
-                            .setEmoji('🧮')
+                            .setStyle(ButtonStyle.Success)
                     );
                 
                 await message.channel.send({ embeds: [infoEmbed], components: [infoButtons] });
@@ -611,7 +608,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setCustomId('payment_method')
                     .setLabel('Payment method')
                     .setStyle(TextInputStyle.Short)
-                    .setPlaceholder('PayPal, BTC, ETH, LTC, USDT, Venmo, CashApp')
+                    .setPlaceholder('PayPal, BTC, ETH, LTC, USDT')
                     .setRequired(true);
                 
                 const usernameInput = new TextInputBuilder()
