@@ -1,4 +1,115 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+// Configure trade amount modal
+            if (interaction.customId === 'configure_trade_amount') {
+                const member = interaction.guild.members.cache.get(interaction.user.id);
+                if (!hasStaffRole(member)) {
+                    await safeReply(interaction, {
+                        content: '❌ Only staff members can configure trade amounts.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const actualAmount = interaction.fields.getTextInputValue('actual_amount');
+                const actualPrice = interaction.fields.getTextInputValue('actual_price');
+                const tradeNotes = interaction.fields.getTextInputValue('trade_notes') || 'No additional notes';
+                
+                const parsedAmount = parseAmount(actualAmount);
+                const parsedPrice = parseFloat(actualPrice);
+                
+                if (parsedAmount <= 0 || isNaN(parsedPrice) || parsedPrice <= 0) {
+                    await safeReply(interaction, {
+                        content: '❌ Invalid amount or price. Please enter valid numbers.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const channel = interaction.channel;
+                
+                // Find customer from channel permissions
+                const customerPermission = channel.permissionOverwrites.cache.find(overwrite => 
+                    overwrite.type === 1 && overwrite.allow.has(PermissionFlagsBits.ViewChannel) && overwrite.id !== STAFF_ROLE_ID
+                );
+                
+                if (customerPermission) {
+                    const customerId = customerPermission.id;
+                    const customer = interaction.guild.members.cache.get(customerId);
+                    
+                    if (!userHistory.has(customerId)) {
+                        userHistory.set(customerId, []);
+                    }
+                    
+                    const trade = {
+                        type: channel.name.includes('buy') ? 'buy' : 'sell',
+                        amount: parsedAmount,
+                        price: parsedPrice,
+                        date: new Date().toISOString(),
+                        completedBy: interaction.user.username,
+                        ticketChannel: channel.name,
+                        notes: tradeNotes,
+                        configured: true
+                    };
+                    
+                    userHistory.get(customerId).push(trade);
+                    
+                    const configEmbed = new EmbedBuilder()
+                        .setTitle('✅ Trade Configured & Added to History')
+                        .setDescription(`Successfully configured and added custom trade for ${customer ? customer.user.username : 'Unknown User'}`)
+                        .addFields(
+                            { name: 'Actual Amount', value: formatNumber(parsedAmount), inline: true },
+                            { name: 'Actual Price', value: `${parsedPrice.toFixed(2)}`, inline: true },
+                            { name: 'Configured By', value: interaction.user.username, inline: true },
+                            { name: 'Notes', value: tradeNotes, inline: false }
+                        )
+                        .setColor('#00ff00')
+                        .setFooter({ text: 'Custom trade entry completed - Closing ticket in 5 seconds...' });
+                    
+                    await safeReply(interaction, {
+                        embeds: [configEmbed]
+                    });
+                    
+                    // Close ticket after 5 seconds
+                    setTimeout(async () => {
+                        try {
+                            // Generate transcript with configured status
+                            const messages = ticketMessages.get(channel.id) || [];
+                            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+                            
+                            if (transcriptChannel) {
+                                const ticketName = channel.name;
+                                const createdTime = new Date(channel.createdTimestamp).toLocaleString();
+                                const closedTime = new Date().toLocaleString();
+                                
+                                let transcriptText = `TICKET TRANSCRIPT - ${ticketName}\n`;
+                                transcriptText += `Created: ${createdTime}\n`;
+                                transcriptText += `Ticket Channel ID: ${channel.id}\n`;
+                                transcriptText += `Total Messages: ${messages.length}\n\n`;
+                                transcriptText += `Status: CONFIGURED & FILLED\n`;
+                                transcriptText += `Actual Amount: ${formatNumber(parsedAmount)}\n`;
+                                transcriptText += `Actual Price: ${parsedPrice.toFixed(2)}\n`;
+                                transcriptText += `Configured By: ${interaction.user.username}\n`;
+                                transcriptText += `Notes: ${tradeNotes}\n\n`;
+                                transcriptText += `--- CONVERSATION ---\n\n`;
+                                
+                                messages.forEach((msg) => {
+                                    const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+                                    transcriptText += `[${timestamp}] ${msg.author}: ${msg.content || '[Embed/System Message]'}\n\n`;
+                                });
+                                
+                                transcriptText += `--- END TRANSCRIPT ---\n`;
+                                transcriptText += `Transcript generated on: ${closedTime}\n`;
+                                transcriptText += `David's Coins | Ticket System\n`;
+                                
+                                const transcriptEmbed = new EmbedBuilder()
+                                    .setTitle('📄 Ticket Transcript')
+                                    .setDescription(`Transcript for ${ticketName}`)
+                                    .addFields(
+                                        { name: 'Ticket Channel', value: ticketName, inline: true },
+                                        { name: 'Closed By', value: interaction.user.username, inline: true },
+                                        { name: 'Status', value: '⚙️ Configured & Filled', inline: true },
+                                        { name: 'Final Amount', value: formatNumber(parsedAmount), inline: true },
+                                        { name: 'Final Price', value: `${parsedPrice.toFixed(2)}`, inline: true },
+                                        { name: 'Closed At', value: closedTimeconst { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
 require('dotenv').config();
 
 // Bot configuration
@@ -61,6 +172,9 @@ const ticketMessages = new Map();
 
 // Track active tickets per user
 const activeTickets = new Map(); // userId -> channelId
+
+// User trade history tracking
+const userHistory = new Map(); // userId -> array of trades
 
 // Helper functions
 function safeDeleteMessage(message) {
@@ -263,9 +377,11 @@ function createHelpEmbed() {
             '• `!verify` - Create verification message\n' +
             '• `!close` - Close ticket (ticket channels only)\n' +
             '• `!price` - Update prices via modal\n' +
+            '• `!historyedit @user <amount>` - Add to user\'s trade history\n' +
             '• `!help` - Show this help message\n\n' +
             '**👥 Public Commands:**\n' +
-            '• `!crypto` - Show cryptocurrency wallet addresses\n\n' +
+            '• `!crypto` - Show cryptocurrency wallet addresses\n' +
+            '• `!history` - View your trade history\n\n' +
             '**📋 How to Use:**\n' +
             '• Most commands require staff role\n' +
             '• Use buttons on embeds for trading\n' +
@@ -444,6 +560,57 @@ client.on('messageCreate', async (message) => {
             return;
         }
         
+        if (command === 'history') {
+            const userTrades = userHistory.get(message.author.id) || [];
+            
+            if (userTrades.length === 0) {
+                const noHistoryEmbed = new EmbedBuilder()
+                    .setTitle('📊 Trade History')
+                    .setDescription('You haven\'t completed any trades yet!\n\nStart trading by using the `!info` command.')
+                    .setColor('#ff6600')
+                    .setFooter({ text: 'David\'s Coins - Trade History' });
+                
+                await message.channel.send({ embeds: [noHistoryEmbed] });
+                botStats.messagesSent++;
+                return;
+            }
+            
+            // Calculate total volume and trades
+            const totalVolume = userTrades.reduce((sum, trade) => sum + trade.amount, 0);
+            const totalSpent = userTrades.reduce((sum, trade) => sum + trade.price, 0);
+            
+            // Create history embed
+            const historyEmbed = new EmbedBuilder()
+                .setTitle('📊 Trade History')
+                .setDescription(`**${message.author.username}'s Trading Summary**\n\n` +
+                    `**Total Trades:** ${userTrades.length}\n` +
+                    `**Total Volume:** ${formatNumber(totalVolume)} coins\n` +
+                    `**Total Spent:** ${totalSpent.toFixed(2)}\n` +
+                    `**Average Trade:** ${formatNumber(totalVolume / userTrades.length)} coins\n\n` +
+                    '**Recent Transactions:**')
+                .setColor('#00ff00')
+                .setFooter({ text: `David's Coins - ${userTrades.length} completed trades` });
+            
+            // Add recent trades (last 10)
+            const recentTrades = userTrades.slice(-10).reverse();
+            recentTrades.forEach((trade, index) => {
+                const tradeDate = new Date(trade.date).toLocaleDateString();
+                historyEmbed.addFields({
+                    name: `${index + 1}. ${trade.type === 'buy' ? '🟢 Bought' : '🔴 Sold'} ${formatNumber(trade.amount)}`,
+                    value: `💰 ${trade.price.toFixed(2)} • 📅 ${tradeDate}`,
+                    inline: true
+                });
+            });
+            
+            if (userTrades.length > 10) {
+                historyEmbed.setDescription(historyEmbed.data.description + `\n*Showing 10 most recent trades*`);
+            }
+            
+            await message.channel.send({ embeds: [historyEmbed] });
+            botStats.messagesSent++;
+            return;
+        }
+        
         // Staff-only commands
         if (!hasStaffRole(member)) {
             await message.channel.send('❌ This command requires staff permissions.').then(msg => {
@@ -521,21 +688,34 @@ client.on('messageCreate', async (message) => {
                 }
                 
                 const closeEmbed = new EmbedBuilder()
-                    .setTitle('🔒 Close Ticket')
-                    .setDescription('Are you sure you want to close this ticket?\n\n' +
-                        'This action cannot be undone.')
-                    .setColor('#ff0000');
+                    .setTitle('🔒 Complete Ticket')
+                    .setDescription('**Order Status**\n\n' +
+                        'Was this order successfully completed?\n\n' +
+                        '• **Filled** - Order completed successfully (adds to trade history)\n' +
+                        '• **Not Filled** - Order cancelled/incomplete (no history entry)')
+                    .setColor('#0099ff')
+                    .setFooter({ text: 'Choose the appropriate status for this ticket' });
                 
-                const closeButton = new ActionRowBuilder()
+                const statusButtons = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
-                            .setCustomId('confirm_close')
-                            .setLabel('Close Ticket')
+                            .setCustomId('order_filled')
+                            .setLabel('Filled')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('✅'),
+                        new ButtonBuilder()
+                            .setCustomId('order_not_filled')
+                            .setLabel('Not Filled')
                             .setStyle(ButtonStyle.Danger)
-                            .setEmoji('🔒')
+                            .setEmoji('❌'),
+                        new ButtonBuilder()
+                            .setCustomId('configure_amount')
+                            .setLabel('Configure Amount')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji('⚙️')
                     );
                 
-                await message.channel.send({ embeds: [closeEmbed], components: [closeButton] });
+                await message.channel.send({ embeds: [closeEmbed], components: [statusButtons] });
                 botStats.messagesSent++;
                 break;
             
@@ -559,6 +739,79 @@ client.on('messageCreate', async (message) => {
                     );
                 
                 await message.channel.send({ embeds: [priceUpdateEmbed], components: [updatePriceButton] });
+                botStats.messagesSent++;
+                break;
+            
+            case 'historyedit':
+                if (args.length < 3) {
+                    await message.channel.send('❌ Usage: `!historyedit @user <amount>`\nExample: `!historyedit @john123 1.5B`').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+                
+                const userMention = args[1];
+                const amountStr = args.slice(2).join(' ');
+                
+                // Parse user mention
+                const userIdMatch = userMention.match(/^<@!?(\d+)>$/);
+                if (!userIdMatch) {
+                    await message.channel.send('❌ Please mention a valid user. Example: `!historyedit @user 1B`').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+                
+                const targetUserId = userIdMatch[1];
+                const targetUser = message.guild.members.cache.get(targetUserId);
+                if (!targetUser) {
+                    await message.channel.send('❌ User not found in this server.').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+                
+                // Parse amount
+                const parsedAmount = parseAmount(amountStr);
+                if (parsedAmount <= 0) {
+                    await message.channel.send('❌ Invalid amount. Please enter a valid number (e.g., 500M, 1.5B)').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+                
+                // Calculate price (assume buy rate)
+                const price = calculatePrice(parsedAmount, 'buy');
+                const formattedAmount = formatNumber(parsedAmount);
+                
+                // Add to user's history
+                if (!userHistory.has(targetUserId)) {
+                    userHistory.set(targetUserId, []);
+                }
+                
+                const trade = {
+                    type: 'buy', // Default to buy for manual entries
+                    amount: parsedAmount,
+                    price: price,
+                    date: new Date().toISOString(),
+                    addedBy: message.author.username,
+                    manual: true
+                };
+                
+                userHistory.get(targetUserId).push(trade);
+                
+                const successEmbed = new EmbedBuilder()
+                    .setTitle('✅ Trade Added to History')
+                    .setDescription(`Successfully added trade to ${targetUser.user.username}'s history!`)
+                    .addFields(
+                        { name: 'Amount', value: formattedAmount, inline: true },
+                        { name: 'Estimated Value', value: `${price.toFixed(2)}`, inline: true },
+                        { name: 'Added By', value: message.author.username, inline: true }
+                    )
+                    .setColor('#00ff00')
+                    .setFooter({ text: 'Manual trade entry completed' });
+                
+                await message.channel.send({ embeds: [successEmbed] });
                 botStats.messagesSent++;
                 break;
             
@@ -701,7 +954,208 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
             
-            // Close ticket button
+            // Order completion buttons (staff only)
+            if (interaction.customId === 'order_filled' || interaction.customId === 'order_not_filled' || interaction.customId === 'configure_amount') {
+                if (!hasStaffRole(member)) {
+                    await safeReply(interaction, {
+                        content: '❌ Only staff members can manage order completion.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const channel = interaction.channel;
+                if (!channel.name || !channel.name.startsWith('ticket-')) {
+                    await safeReply(interaction, {
+                        content: '❌ This can only be used in ticket channels.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                if (interaction.customId === 'configure_amount') {
+                    const configModal = new ModalBuilder()
+                        .setCustomId('configure_trade_amount')
+                        .setTitle('Configure Trade Amount');
+                    
+                    const amountInput = new TextInputBuilder()
+                        .setCustomId('actual_amount')
+                        .setLabel('Actual amount traded')
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder('e.g., 800M, 1.2B (actual coins traded)')
+                        .setRequired(true);
+                    
+                    const priceInput = new TextInputBuilder()
+                        .setCustomId('actual_price')
+                        .setLabel('Actual price (USD)')
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder('e.g., 32.00 (actual amount paid)')
+                        .setRequired(true);
+                    
+                    const notesInput = new TextInputBuilder()
+                        .setCustomId('trade_notes')
+                        .setLabel('Additional notes (optional)')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setPlaceholder('Any special notes about this trade...')
+                        .setRequired(false);
+                    
+                    const firstRow = new ActionRowBuilder().addComponents(amountInput);
+                    const secondRow = new ActionRowBuilder().addComponents(priceInput);
+                    const thirdRow = new ActionRowBuilder().addComponents(notesInput);
+                    
+                    configModal.addComponents(firstRow, secondRow, thirdRow);
+                    await interaction.showModal(configModal);
+                    return;
+                }
+                
+                // Handle filled/not filled
+                const filled = interaction.customId === 'order_filled';
+                
+                if (filled) {
+                    // Extract ticket info and add to history
+                    const messages = ticketMessages.get(channel.id) || [];
+                    if (messages.length > 0) {
+                        const firstMessage = messages[0];
+                        if (firstMessage.embed) {
+                            const ticketInfo = firstMessage.embed;
+                            
+                            // Extract customer info from channel permissions
+                            const customerPermission = channel.permissionOverwrites.cache.find(overwrite => 
+                                overwrite.type === 1 && overwrite.allow.has(PermissionFlagsBits.ViewChannel) && overwrite.id !== STAFF_ROLE_ID
+                            );
+                            
+                            if (customerPermission && ticketInfo.description) {
+                                const amountMatch = ticketInfo.description.match(/\*\*Amount\*\*\n(.+)/);
+                                const priceMatch = ticketInfo.description.match(/\*\*Price\*\*\n\$(.+)/);
+                                const typeMatch = ticketInfo.title.includes('buy') ? 'buy' : 'sell';
+                                
+                                if (amountMatch && priceMatch) {
+                                    const amount = parseAmount(amountMatch[1]);
+                                    const price = parseFloat(priceMatch[1]);
+                                    
+                                    if (!userHistory.has(customerPermission.id)) {
+                                        userHistory.set(customerPermission.id, []);
+                                    }
+                                    
+                                    const trade = {
+                                        type: typeMatch,
+                                        amount: amount,
+                                        price: price,
+                                        date: new Date().toISOString(),
+                                        completedBy: interaction.user.username,
+                                        ticketChannel: channel.name
+                                    };
+                                    
+                                    userHistory.get(customerPermission.id).push(trade);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                await safeReply(interaction, {
+                    content: `${filled ? '✅ Order marked as filled and added to trade history' : '❌ Order marked as not filled - no history entry created'}. Generating transcript and closing ticket in 5 seconds...`,
+                    ephemeral: true
+                });
+                
+                setTimeout(async () => {
+                    try {
+                        // Generate transcript (existing code)
+                        const messages = ticketMessages.get(channel.id) || [];
+                        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+                        
+                        if (transcriptChannel && messages.length > 0) {
+                            // ... transcript generation code stays the same ...
+                            const firstMessage = messages[0];
+                            const ticketInfo = firstMessage.embed;
+                            const ticketName = channel.name;
+                            const createdTime = new Date(channel.createdTimestamp).toLocaleString();
+                            const closedTime = new Date().toLocaleString();
+                            const closedBy = interaction.user.username;
+                            
+                            let ign = 'Unknown';
+                            let transactionType = 'Unknown';
+                            let cost = 'Unknown';
+                            let rate = 'Unknown';
+                            
+                            if (ticketInfo && ticketInfo.description) {
+                                const ignMatch = ticketInfo.description.match(/\*\*Username:\*\* (.+)/);
+                                const typeMatch = ticketInfo.title.includes('buy') ? 'Buying' : 'Selling';
+                                const priceMatch = ticketInfo.description.match(/\*\*Price\*\*\n\$(.+)/);
+                                const amountMatch = ticketInfo.description.match(/\*\*Amount\*\*\n(.+)/);
+                                
+                                if (ignMatch) ign = ignMatch[1];
+                                transactionType = typeMatch;
+                                if (priceMatch && amountMatch) cost = `${priceMatch[1]} for ${amountMatch[1]}`;
+                            }
+                            
+                            let transcriptText = `TICKET TRANSCRIPT - ${ticketName}\n`;
+                            transcriptText += `Created: ${createdTime}\n`;
+                            transcriptText += `Ticket Channel ID: ${channel.id}\n`;
+                            transcriptText += `Total Messages: ${messages.length}\n\n`;
+                            transcriptText += `IGN: ${ign}\n`;
+                            transcriptText += `Transaction: ${transactionType}\n`;
+                            transcriptText += `Cost: ${cost}\n`;
+                            transcriptText += `Status: ${filled ? 'FILLED' : 'NOT FILLED'}\n`;
+                            transcriptText += `Customer: ${ticketInfo?.title?.split(' ')[0] || 'Unknown'}\n\n`;
+                            transcriptText += `--- CONVERSATION ---\n\n`;
+                            
+                            messages.forEach((msg) => {
+                                const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+                                transcriptText += `[${timestamp}] ${msg.author}: ${msg.content || '[Embed/System Message]'}\n\n`;
+                            });
+                            
+                            transcriptText += `[${new Date().toLocaleTimeString()}] David's Coins [BOT]: ${filled ? 'Order marked as filled and added to trade history' : 'Order marked as not filled - no history entry created'}. Generating transcript and closing ticket in 5 seconds...\n\n`;
+                            transcriptText += `--- END TRANSCRIPT ---\n`;
+                            transcriptText += `Transcript generated on: ${closedTime}\n`;
+                            transcriptText += `David's Coins | Ticket System\n`;
+                            
+                            const transcriptEmbed = new EmbedBuilder()
+                                .setTitle('📄 Ticket Transcript')
+                                .setDescription(`Transcript for ${ticketName}`)
+                                .addFields(
+                                    { name: 'Ticket Channel', value: ticketName, inline: true },
+                                    { name: 'Closed By', value: closedBy, inline: true },
+                                    { name: 'Status', value: filled ? '✅ Filled' : '❌ Not Filled', inline: true },
+                                    { name: 'Closed At', value: closedTime, inline: false }
+                                )
+                                .setColor(filled ? '#00ff00' : '#ff0000')
+                                .setFooter({ text: 'David\'s Coins | Ticket System' });
+                            
+                            const buffer = Buffer.from(transcriptText, 'utf-8');
+                            const attachment = {
+                                attachment: buffer,
+                                name: `transcript-${ticketName}.txt`
+                            };
+                            
+                            await transcriptChannel.send({
+                                embeds: [transcriptEmbed],
+                                files: [attachment]
+                            });
+                        }
+                        
+                        // Clear tracking and delete channel
+                        ticketMessages.delete(channel.id);
+                        for (const [userId, channelId] of activeTickets.entries()) {
+                            if (channelId === channel.id) {
+                                activeTickets.delete(userId);
+                                break;
+                            }
+                        }
+                        await channel.delete();
+                    } catch (error) {
+                        console.error('Error in ticket completion:', error);
+                        try {
+                            await channel.delete();
+                        } catch (deleteError) {
+                            console.error('Error deleting ticket channel:', deleteError);
+                        }
+                    }
+                }, 5000);
+                return;
+            }
+            
+            // Close ticket button (legacy - keeping for compatibility)
             if (interaction.customId === 'confirm_close') {
                 if (!hasStaffRole(member)) {
                     await safeReply(interaction, {
@@ -996,6 +1450,51 @@ client.on('interactionCreate', async (interaction) => {
                     embeds: [calculateEmbed],
                     ephemeral: true
                 });
+                return;
+            }
+            
+                                        { name: 'Final Price', value: `${parsedPrice.toFixed(2)}`, inline: true },
+                                        { name: 'Closed At', value: closedTime, inline: false }
+                                    )
+                                    .setColor('#0099ff')
+                                    .setFooter({ text: 'David\'s Coins | Ticket System' });
+                                
+                                const buffer = Buffer.from(transcriptText, 'utf-8');
+                                const attachment = {
+                                    attachment: buffer,
+                                    name: `transcript-${ticketName}.txt`
+                                };
+                                
+                                await transcriptChannel.send({
+                                    embeds: [transcriptEmbed],
+                                    files: [attachment]
+                                });
+                            }
+                            
+                            // Clear tracking and delete channel
+                            ticketMessages.delete(channel.id);
+                            for (const [userId, channelId] of activeTickets.entries()) {
+                                if (channelId === channel.id) {
+                                    activeTickets.delete(userId);
+                                    break;
+                                }
+                            }
+                            await channel.delete();
+                        } catch (error) {
+                            console.error('Error in configured ticket completion:', error);
+                            try {
+                                await channel.delete();
+                            } catch (deleteError) {
+                                console.error('Error deleting ticket channel:', deleteError);
+                            }
+                        }
+                    }, 5000);
+                } else {
+                    await safeReply(interaction, {
+                        content: '❌ Could not find customer information for this ticket.',
+                        ephemeral: true
+                    });
+                }
                 return;
             }
             
