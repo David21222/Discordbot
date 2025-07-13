@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { hasStaffRole, safeReply, parseAmount, calculatePrice, formatNumber, calculateCoinsForMoney } = require('../utils/utils');
 const { activeListings, activeTickets, ticketMessages, botStats } = require('../utils/stats');
 const { createBuyerNotificationEmbed } = require('../utils/embeds');
