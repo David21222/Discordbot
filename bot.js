@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 require('dotenv').config();
 
 // Bot configuration
@@ -25,6 +25,8 @@ const VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID;
 // Hard-coded IDs
 const TRANSCRIPT_CHANNEL_ID = '1387582544278585487';
 const OWNER_USER_ID = '752590954388783196';
+const PROFILE_CATEGORY_ID = '1393744189187166279';
+const PROFILE_CHANNEL_ID = '1393744763131400323';
 
 // Cryptocurrency wallet addresses
 const CRYPTO_WALLETS = {
@@ -39,7 +41,8 @@ const EMOJIS = {
     LTC: '<:LTC:1387494812269412372>',
     BTC: '<:BTC:1387494854497669242>',
     ETH: '<:ETH:1387494868531675226>',
-    USDT: '<:USDT:1387494839855218798>'
+    USDT: '<:USDT:1387494839855218798>',
+    SKYBLOCK: '<:skyblock_level:1393120347427049585>'
 };
 
 // Pricing structure
@@ -53,7 +56,8 @@ let prices = {
 const botStats = {
     startTime: Date.now(),
     ticketsCreated: 0,
-    messagesSent: 0
+    messagesSent: 0,
+    profilesListed: 0
 };
 
 // Ticket message tracking
@@ -61,6 +65,9 @@ const ticketMessages = new Map();
 
 // Track active tickets per user
 const activeTickets = new Map(); // userId -> channelId
+
+// Track active listings
+const activeListings = new Map(); // userId -> listingData
 
 // Helper functions
 function safeDeleteMessage(message) {
@@ -263,7 +270,8 @@ function createHelpEmbed() {
             '• `!verify` - Create verification message\n' +
             '• `!close` - Close ticket (ticket channels only)\n' +
             '• `!price` - Update prices via modal\n' +
-            '• `!help` - Show this help message\n\n' +
+            '• `!help` - Show this help message\n' +
+            '• `/list` - List Skyblock account or profile for sale\n\n' +
             '**👥 Public Commands:**\n' +
             '• `!crypto` - Show cryptocurrency wallet addresses\n\n' +
             '**📋 How to Use:**\n' +
@@ -274,11 +282,33 @@ function createHelpEmbed() {
         .setFooter({ text: 'David\'s Coins - Command Help' });
 }
 
+// Register slash commands
+async function registerSlashCommands() {
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('list')
+            .setDescription('List a Skyblock account or profile for sale')
+    ];
+
+    try {
+        console.log('Started refreshing application (/) commands.');
+        
+        await client.application.commands.set(commands, GUILD_ID);
+        
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error('Error registering slash commands:', error);
+    }
+}
+
 // Bot ready event
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`✅ Bot is ready! Logged in as ${client.user.tag}`);
     console.log(`🌍 Connected to ${client.guilds.cache.size} servers`);
     console.log(`👥 Serving ${client.users.cache.size} users`);
+    
+    // Register slash commands
+    await registerSlashCommands();
     
     // Set bot activity
     client.user.setActivity('David\'s Coins | !help', { type: 'WATCHING' });
@@ -352,6 +382,7 @@ client.on('messageCreate', async (message) => {
                             { name: '👥 Users', value: client.users.cache.size.toString(), inline: true },
                             { name: '🎫 Tickets Created', value: botStats.ticketsCreated.toString(), inline: true },
                             { name: '💬 Messages Sent', value: botStats.messagesSent.toString(), inline: true },
+                            { name: '📝 Profiles Listed', value: botStats.profilesListed.toString(), inline: true },
                             { name: '💾 Memory Usage', value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`, inline: true }
                         )
                         .setColor('#0099ff');
@@ -578,8 +609,188 @@ client.on('messageCreate', async (message) => {
 // Interaction handler
 client.on('interactionCreate', async (interaction) => {
     try {
+        // Handle slash commands
+        if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'list') {
+                const member = interaction.guild.members.cache.get(interaction.user.id);
+                
+                if (!hasStaffRole(member)) {
+                    await safeReply(interaction, {
+                        content: '❌ Only staff members can create listings.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                // Check if user already has an active listing
+                if (activeListings.has(interaction.user.id)) {
+                    await safeReply(interaction, {
+                        content: '❌ You already have an active listing. Please finish or cancel your current listing first.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                // Create listing type selection embed
+                const listingEmbed = new EmbedBuilder()
+                    .setTitle(`${EMOJIS.SKYBLOCK} Create New Listing`)
+                    .setDescription('**What would you like to list for sale?**\n\n' +
+                        '**Account** - Complete Skyblock account with all profiles\n' +
+                        '**Profile** - Single Skyblock profile on an account\n\n' +
+                        'Select the type of listing you want to create:')
+                    .setColor('#0099ff')
+                    .setFooter({ text: 'David\'s Coins - Skyblock Listings' });
+                
+                const typeButtons = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('list_account')
+                            .setLabel('List Account')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('👤'),
+                        new ButtonBuilder()
+                            .setCustomId('list_profile')
+                            .setLabel('List Profile')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji(EMOJIS.SKYBLOCK.replace('<:', '').replace('>', '').split(':')[1])
+                    );
+                
+                await safeReply(interaction, {
+                    embeds: [listingEmbed],
+                    components: [typeButtons],
+                    ephemeral: true
+                });
+                
+                // Store initial listing data
+                activeListings.set(interaction.user.id, {
+                    step: 'type_selection',
+                    userId: interaction.user.id,
+                    username: interaction.user.username
+                });
+                return;
+            }
+        }
+        
         if (interaction.isButton()) {
             const member = interaction.guild.members.cache.get(interaction.user.id);
+            
+            // Handle listing type selection
+            if (interaction.customId === 'list_account' || interaction.customId === 'list_profile') {
+                const listingData = activeListings.get(interaction.user.id);
+                if (!listingData) {
+                    await safeReply(interaction, {
+                        content: '❌ Listing session expired. Please use `/list` again.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const listingType = interaction.customId === 'list_account' ? 'account' : 'profile';
+                listingData.type = listingType;
+                listingData.step = 'details_input';
+                
+                // Create modal for listing details
+                const detailsModal = new ModalBuilder()
+                    .setCustomId('listing_details')
+                    .setTitle(`List Skyblock ${listingType.charAt(0).toUpperCase() + listingType.slice(1)}`);
+                
+                const titleInput = new TextInputBuilder()
+                    .setCustomId('listing_title')
+                    .setLabel(`${listingType.charAt(0).toUpperCase() + listingType.slice(1)} Title/Name`)
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder(`e.g., ${listingType === 'account' ? 'High Level Skyblock Account' : 'Ironman Profile - Level 180'}`)
+                    .setRequired(true)
+                    .setMaxLength(100);
+                
+                const descriptionInput = new TextInputBuilder()
+                    .setCustomId('listing_description')
+                    .setLabel('Description')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Describe the account/profile features, stats, items, etc.')
+                    .setRequired(true)
+                    .setMaxLength(1000);
+                
+                const priceInput = new TextInputBuilder()
+                    .setCustomId('listing_price')
+                    .setLabel('Price (USD)')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('e.g., 150, 250.50')
+                    .setRequired(true)
+                    .setMaxLength(10);
+                
+                const firstRow = new ActionRowBuilder().addComponents(titleInput);
+                const secondRow = new ActionRowBuilder().addComponents(descriptionInput);
+                const thirdRow = new ActionRowBuilder().addComponents(priceInput);
+                
+                detailsModal.addComponents(firstRow, secondRow, thirdRow);
+                
+                await interaction.showModal(detailsModal);
+                return;
+            }
+            
+            // Handle payment method selection
+            if (interaction.customId === 'payment_ltc' || interaction.customId === 'payment_paypal' || interaction.customId === 'payment_both') {
+                const listingData = activeListings.get(interaction.user.id);
+                if (!listingData || listingData.step !== 'payment_selection') {
+                    await safeReply(interaction, {
+                        content: '❌ Listing session expired. Please use `/list` again.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                let paymentMethods = [];
+                let paymentText = '';
+                
+                if (interaction.customId === 'payment_ltc') {
+                    paymentMethods = ['LTC'];
+                    paymentText = `${EMOJIS.LTC}`;
+                } else if (interaction.customId === 'payment_paypal') {
+                    paymentMethods = ['PayPal'];
+                    paymentText = '💳'; // Using generic payment emoji for now
+                } else if (interaction.customId === 'payment_both') {
+                    paymentMethods = ['LTC', 'PayPal'];
+                    paymentText = `${EMOJIS.LTC}💳`;
+                }
+                
+                listingData.paymentMethods = paymentMethods;
+                listingData.paymentText = paymentText;
+                
+                // Create final listing
+                await createListing(interaction, listingData);
+                return;
+            }
+            
+            // Handle unlist button
+            if (interaction.customId.startsWith('unlist_')) {
+                const listingId = interaction.customId.split('_')[1];
+                
+                if (!hasStaffRole(member)) {
+                    await safeReply(interaction, {
+                        content: '❌ Only the listing creator or staff can unlist items.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                // Update the listing message to show it's been unlisted
+                const embed = new EmbedBuilder()
+                    .setTitle('🚫 Listing Removed')
+                    .setDescription('This listing has been removed by staff.')
+                    .setColor('#ff0000')
+                    .setTimestamp();
+                
+                await interaction.update({
+                    embeds: [embed],
+                    components: []
+                });
+                
+                await safeReply(interaction, {
+                    content: '✅ Listing has been removed successfully.',
+                    ephemeral: true
+                });
+                return;
+            }
             
             // Crypto copy buttons
             if (interaction.customId.startsWith('copy_')) {
@@ -839,6 +1050,75 @@ client.on('interactionCreate', async (interaction) => {
         }
         
         if (interaction.isModalSubmit()) {
+            // Listing details modal submission
+            if (interaction.customId === 'listing_details') {
+                const listingData = activeListings.get(interaction.user.id);
+                if (!listingData) {
+                    await safeReply(interaction, {
+                        content: '❌ Listing session expired. Please use `/list` again.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                const title = interaction.fields.getTextInputValue('listing_title');
+                const description = interaction.fields.getTextInputValue('listing_description');
+                const priceText = interaction.fields.getTextInputValue('listing_price');
+                
+                // Validate price
+                const price = parseFloat(priceText.replace(/[^0-9.]/g, ''));
+                if (isNaN(price) || price <= 0) {
+                    await safeReply(interaction, {
+                        content: '❌ Invalid price. Please enter a valid number (e.g., 150, 250.50).',
+                        ephemeral: true
+                    });
+                    return;
+                }
+                
+                // Store listing data
+                listingData.title = title;
+                listingData.description = description;
+                listingData.price = price;
+                listingData.step = 'payment_selection';
+                
+                // Create payment method selection
+                const paymentEmbed = new EmbedBuilder()
+                    .setTitle('💳 Select Payment Methods')
+                    .setDescription('**Which payment methods do you accept for this listing?**\n\n' +
+                        `${EMOJIS.LTC} **Litecoin (LTC)** - Cryptocurrency payment\n` +
+                        '💳 **PayPal** - Traditional payment method\n' +
+                        '🔄 **Both** - Accept both LTC and PayPal\n\n' +
+                        'Choose your preferred payment option:')
+                    .setColor('#00ff00')
+                    .setFooter({ text: 'David\'s Coins - Payment Selection' });
+                
+                const paymentButtons = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('payment_ltc')
+                            .setLabel('LTC Only')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji(EMOJIS.LTC.replace('<:', '').replace('>', '').split(':')[1]),
+                        new ButtonBuilder()
+                            .setCustomId('payment_paypal')
+                            .setLabel('PayPal Only')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('💳'),
+                        new ButtonBuilder()
+                            .setCustomId('payment_both')
+                            .setLabel('Both')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('🔄')
+                    );
+                
+                await safeReply(interaction, {
+                    embeds: [paymentEmbed],
+                    components: [paymentButtons],
+                    ephemeral: true
+                });
+                return;
+            }
+            
             // Buy/Sell modal submissions
             if (interaction.customId === 'buy_modal' || interaction.customId === 'sell_modal') {
                 const type = interaction.customId === 'buy_modal' ? 'buy' : 'sell';
@@ -1059,87 +1339,24 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Reaction handler for verification
-client.on('messageReactionAdd', async (reaction, user) => {
-    if (user.bot) return;
-    
+// Function to create the final listing
+async function createListing(interaction, listingData) {
     try {
-        // Fetch the reaction if it's partial
-        if (reaction.partial) {
-            await reaction.fetch();
+        const guild = interaction.guild;
+        const profileChannel = guild.channels.cache.get(PROFILE_CHANNEL_ID);
+        
+        if (!profileChannel) {
+            await safeReply(interaction, {
+                content: '❌ Profile channel not found. Please contact an administrator.',
+                ephemeral: true
+            });
+            return;
         }
         
-        // Check if it's a verification reaction
-        if (reaction.emoji.name === '✅') {
-            const guild = reaction.message.guild;
-            const member = guild.members.cache.get(user.id);
-            
-            if (!member) return;
-            
-            // Check if user already has verified role
-            if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
-                // Remove the reaction
-                await reaction.users.remove(user.id);
-                return;
-            }
-            
-            // Add verified role
-            await member.roles.add(VERIFIED_ROLE_ID);
-            
-            // Remove the reaction
-            await reaction.users.remove(user.id);
-            
-            // Send confirmation DM
-            try {
-                const welcomeEmbed = new EmbedBuilder()
-                    .setTitle('✅ Verification Successful!')
-                    .setDescription(`Welcome to **${guild.name}**!\n\n` +
-                        'You now have access to all channels. Feel free to:\n' +
-                        '• Browse our trading information\n' +
-                        '• Create tickets to buy/sell coins\n' +
-                        '• Ask questions in our support channels\n\n' +
-                        'Thank you for joining David\'s Coins!')
-                    .setColor('#00ff00')
-                    .setFooter({ text: 'David\'s Coins - Trusted Trading' });
-                
-                await user.send({ embeds: [welcomeEmbed] });
-            } catch (dmError) {
-                console.log('Could not send DM to user:', user.username);
-            }
-        }
-    } catch (error) {
-        console.error('Reaction add error:', error);
-    }
-});
-
-// Error handling
-client.on('error', error => {
-    console.error('Discord client error:', error);
-});
-
-client.on('warn', warning => {
-    console.warn('Discord client warning:', warning);
-});
-
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
-});
-
-// Graceful shutdown for Railway
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully...');
-    client.destroy();
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    console.log('SIGINT received, shutting down gracefully...');
-    client.destroy();
-    process.exit(0);
-});
-
-// Login
-client.login(TOKEN).catch(error => {
-    console.error('Failed to login:', error);
-    process.exit(1);
-});
+        // Create listing embed
+        const listingEmbed = new EmbedBuilder()
+            .setTitle(`${EMOJIS.SKYBLOCK} ${listingData.title}`)
+            .setDescription(`**${listingData.type.charAt(0).toUpperCase() + listingData.type.slice(1)} for Sale**\n\n` +
+                `${listingData.description}\n\n` +
+                `**💰 Price:** ${listingData.price} USD\n` +
+                `**
