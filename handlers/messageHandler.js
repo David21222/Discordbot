@@ -7,8 +7,9 @@ const config = require('../config/config');
 async function handleMessageCommands(client, message) {
     if (message.author.bot) return;
     
-    // Track messages in tickets
-    if (message.channel.name && message.channel.name.startsWith('ticket-')) {
+    // Track messages in tickets AND account-purchase channels
+    if (message.channel.name && 
+        (message.channel.name.startsWith('ticket-') || message.channel.name.startsWith('account-purchase-'))) {
         if (!ticketMessages.has(message.channel.id)) {
             ticketMessages.set(message.channel.id, []);
         }
@@ -233,7 +234,8 @@ async function handleMessageCommands(client, message) {
                 break;
             
             case 'close':
-                if (!message.channel.name || !message.channel.name.startsWith('ticket-')) {
+                // Updated to handle both ticket- and account-purchase- channels
+                if (!message.channel.name || (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('account-purchase-'))) {
                     await message.channel.send('❌ This command can only be used in ticket channels.').then(msg => {
                         setTimeout(() => safeDeleteMessage(msg), 5000);
                     });
