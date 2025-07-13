@@ -4,6 +4,9 @@ const { activeListings, activeTickets, ticketMessages, botStats } = require('../
 const { createListingEmbed, createBuyerNotificationEmbed } = require('../utils/embeds');
 const config = require('../config/config');
 
+// Store completed listings (in production, use a database)
+const completedListings = new Map(); // messageId -> fullListingData
+
 async function handleButtonInteractions(interaction) {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     
@@ -22,7 +25,7 @@ async function handleButtonInteractions(interaction) {
         listingData.type = listingType;
         listingData.step = 'details_input';
         
-        // Create modal for listing details
+        // Create modal for listing details with account worth field
         const detailsModal = new ModalBuilder()
             .setCustomId('listing_details')
             .setTitle(`List Skyblock ${listingType.charAt(0).toUpperCase() + listingType.slice(1)}`);
@@ -51,11 +54,20 @@ async function handleButtonInteractions(interaction) {
             .setRequired(true)
             .setMaxLength(10);
         
+        const worthInput = new TextInputBuilder()
+            .setCustomId('account_worth')
+            .setLabel('Account Worth (for channel name)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., 1400 (will show as $ 1400 | account-4 ⭐)')
+            .setRequired(true)
+            .setMaxLength(20);
+        
         const firstRow = new ActionRowBuilder().addComponents(titleInput);
         const secondRow = new ActionRowBuilder().addComponents(descriptionInput);
         const thirdRow = new ActionRowBuilder().addComponents(priceInput);
+        const fourthRow = new ActionRowBuilder().addComponents(worthInput);
         
-        detailsModal.addComponents(firstRow, secondRow, thirdRow);
+        detailsModal.addComponents(firstRow, secondRow, thirdRow, fourthRow);
         
         await interaction.showModal(detailsModal);
         return;
@@ -88,9 +100,197 @@ async function handleButtonInteractions(interaction) {
         
         listingData.paymentMethods = paymentMethods;
         listingData.paymentText = paymentText;
+        listingData.step = 'owner_selection';
         
-        // Create final listing
-        await createListing(interaction, listingData);
+        // Show owner selection modal
+        const ownerModal = new ModalBuilder()
+            .setCustomId('owner_selection')
+            .setTitle('Set Account Owner');
+        
+        const ownerInput = new TextInputBuilder()
+            .setCustomId('account_owner')
+            .setLabel('Account Owner (User ID or @mention)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., 752590954388783196 or @username')
+            .setRequired(true)
+            .setMaxLength(100);
+        
+        const ownerRow = new ActionRowBuilder().addComponents(ownerInput);
+        ownerModal.addComponents(ownerRow);
+        
+        await interaction.showModal(ownerModal);
+        return;
+    }
+    
+    // Handle Account Owner button
+    if (interaction.customId === 'account_owner') {
+        const listingData = completedListings.get(interaction.message.id);
+        if (!listingData) {
+            await safeReply(interaction, {
+                content: '❌ Could not find listing data.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        const ownerEmbed = new EmbedBuilder()
+            .setTitle('👤 Account Owner')
+            .setDescription(`This account was listed by <@${listingData.ownerId}>`)
+            .setColor('#0099ff')
+            .setFooter({ text: 'David\'s Coins - Account Information' });
+        
+        await safeReply(interaction, {
+            embeds: [ownerEmbed],
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle Buy button
+    if (interaction.customId === 'buy_account') {
+        const listingData = completedListings.get(interaction.message.id);
+        if (!listingData) {
+            await safeReply(interaction, {
+                content: '❌ Could not find listing data.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        const buyModal = new ModalBuilder()
+            .setCustomId('buy_account_modal')
+            .setTitle('Buy an Account');
+        
+        const paymentMethodInput = new TextInputBuilder()
+            .setCustomId('payment_method')
+            .setLabel('Payment Method')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('Crypto')
+            .setRequired(true)
+            .setMaxLength(50);
+        
+        const paymentRow = new ActionRowBuilder().addComponents(paymentMethodInput);
+        buyModal.addComponents(paymentRow);
+        
+        await interaction.showModal(buyModal);
+        return;
+    }
+    
+    // Handle Unlist button (owner only)
+    if (interaction.customId === 'unlist_account') {
+        const listingData = completedListings.get(interaction.message.id);
+        if (!listingData) {
+            await safeReply(interaction, {
+                content: '❌ Could not find listing data.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        // Check if user is the owner
+        if (interaction.user.id !== listingData.ownerId) {
+            await safeReply(interaction, {
+                content: '❌ Only the account owner can unlist this account.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        // Show confirmation modal
+        const confirmEmbed = new EmbedBuilder()
+            .setTitle('⚠️ Confirm Unlist')
+            .setDescription('Are you sure you want to unlist this account?\n\nThis action cannot be undone.')
+            .setColor('#ff0000');
+        
+        const confirmButton = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('confirm_unlist')
+                    .setLabel('Yes, Unlist')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🗑️')
+            );
+        
+        await safeReply(interaction, {
+            embeds: [confirmEmbed],
+            components: [confirmButton],
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle Confirm Unlist
+    if (interaction.customId === 'confirm_unlist') {
+        const listingData = completedListings.get(interaction.message.id);
+        if (!listingData) {
+            await safeReply(interaction, {
+                content: '❌ Could not find listing data.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        try {
+            // Send to unlisted accounts channel
+            const unlistedChannel = interaction.client.channels.cache.get(config.UNLISTED_ACCOUNTS_CHANNEL_ID);
+            if (unlistedChannel) {
+                const unlistedEmbed = new EmbedBuilder()
+                    .setTitle(`🗃️ ${listingData.title}`)
+                    .setDescription(`**Unlisted Account**\n\n` +
+                        `${listingData.description}\n\n` +
+                        `**💰 Price:** $${listingData.price} USD\n` +
+                        `**💳 Payment Methods:** ${listingData.paymentText}\n` +
+                        `**👤 Owner:** <@${listingData.ownerId}>\n` +
+                        `**📅 Originally Listed:** ${listingData.listedDate}\n` +
+                        `**📅 Unlisted:** ${new Date().toLocaleDateString()}`)
+                    .setColor('#808080')
+                    .setFooter({ text: 'David\'s Coins - Unlisted Accounts' })
+                    .setTimestamp();
+                
+                const manageButtons = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('relist_account')
+                            .setLabel('Relist')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('🔄'),
+                        new ButtonBuilder()
+                            .setCustomId('configure_account')
+                            .setLabel('Configure')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('⚙️')
+                    );
+                
+                await unlistedChannel.send({
+                    embeds: [unlistedEmbed],
+                    components: [manageButtons]
+                });
+            }
+            
+            // Update original listing to show it's unlisted
+            const unlistedEmbed = new EmbedBuilder()
+                .setTitle('🚫 Account Unlisted')
+                .setDescription('This account has been removed from the marketplace by the owner.')
+                .setColor('#ff0000')
+                .setTimestamp();
+            
+            await interaction.message.edit({
+                embeds: [unlistedEmbed],
+                components: []
+            });
+            
+            await safeReply(interaction, {
+                content: '✅ Account has been unlisted and moved to the management channel.',
+                ephemeral: true
+            });
+            
+        } catch (error) {
+            console.error('Error unlisting account:', error);
+            await safeReply(interaction, {
+                content: '❌ Error unlisting account. Please contact an administrator.',
+                ephemeral: true
+            });
+        }
         return;
     }
     
@@ -299,14 +499,12 @@ async function handleButtonInteractions(interaction) {
                 const transcriptChannel = interaction.client.channels.cache.get(config.TRANSCRIPT_CHANNEL_ID);
                 
                 if (transcriptChannel && messages.length > 0) {
-                    // Create transcript text
                     let transcriptText = `TICKET TRANSCRIPT - ${channel.name}\n`;
                     transcriptText += `Created: ${new Date(channel.createdTimestamp).toLocaleString()}\n`;
                     transcriptText += `Channel ID: ${channel.id}\n`;
                     transcriptText += `Total Messages: ${messages.length}\n\n`;
                     transcriptText += `--- CONVERSATION ---\n\n`;
                     
-                    // Add all messages to transcript
                     messages.forEach((msg) => {
                         const timestamp = new Date(msg.timestamp).toLocaleTimeString();
                         transcriptText += `[${timestamp}] ${msg.author}: ${msg.content}\n\n`;
@@ -316,7 +514,6 @@ async function handleButtonInteractions(interaction) {
                     transcriptText += `Closed by: ${interaction.user.username}\n`;
                     transcriptText += `Closed on: ${new Date().toLocaleString()}\n`;
                     
-                    // Send transcript as file
                     const buffer = Buffer.from(transcriptText, 'utf-8');
                     const attachment = {
                         attachment: buffer,
@@ -360,8 +557,8 @@ async function handleButtonInteractions(interaction) {
     }
 }
 
-// Function to create the final listing
-async function createListing(interaction, listingData) {
+// Function to create the final account listing
+async function createAccountListing(interaction, listingData) {
     try {
         const guild = interaction.guild;
         const profileChannel = guild.channels.cache.get(config.PROFILE_CHANNEL_ID);
@@ -374,43 +571,89 @@ async function createListing(interaction, listingData) {
             return;
         }
         
-        // Create listing embed
-        const listingEmbed = createListingEmbed(listingData, interaction.user);
+        // Create the channel name in the format: $ 1400 | account-4 ⭐
+        const channelName = `$ ${listingData.worth} | account-${Math.floor(Math.random() * 10)} ⭐`;
         
-        // Create action buttons
+        // Create the listing channel
+        const listingChannel = await guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: config.PROFILE_CATEGORY_ID,
+            permissionOverwrites: [
+                {
+                    id: guild.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                    deny: [PermissionFlagsBits.SendMessages]
+                },
+                {
+                    id: config.STAFF_ROLE_ID,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
+                }
+            ]
+        });
+        
+        // Create listing embed
+        const listingEmbed = new EmbedBuilder()
+            .setTitle(`${config.EMOJIS.SKYBLOCK} ${listingData.title}`)
+            .setDescription(`**${listingData.type.charAt(0).toUpperCase() + listingData.type.slice(1)} for Sale**\n\n` +
+                `${listingData.description}\n\n` +
+                `**💰 Price:** $${listingData.price} USD\n` +
+                `**💳 Payment Methods:** ${listingData.paymentText}\n` +
+                `**📅 Listed:** ${new Date().toLocaleDateString()}`)
+            .setColor('#9d4edd')
+            .setFooter({ text: 'David\'s Coins - Skyblock Marketplace' })
+            .setTimestamp();
+        
+        // Create action buttons with Account Owner button
         const listingButtons = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
-                    .setCustomId('buy_listing')
-                    .setLabel('Buy Now')
+                    .setCustomId('account_owner')
+                    .setLabel('Account Owner')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('👤'),
+                new ButtonBuilder()
+                    .setCustomId('buy_account')
+                    .setLabel('Buy')
                     .setStyle(ButtonStyle.Success)
                     .setEmoji('💰'),
                 new ButtonBuilder()
-                    .setCustomId(`unlist_${Date.now()}`)
-                    .setLabel('Remove Listing')
+                    .setCustomId('unlist_account')
+                    .setLabel('Unlist')
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🗑️')
             );
         
-        // Send listing to profile channel
-        const listingMessage = await profileChannel.send({
+        // Send listing to the new channel
+        const listingMessage = await listingChannel.send({
             embeds: [listingEmbed],
             components: [listingButtons]
         });
         
-        // Clear listing data
+        // Store completed listing data
+        completedListings.set(listingMessage.id, {
+            ...listingData,
+            messageId: listingMessage.id,
+            channelId: listingChannel.id,
+            listedDate: new Date().toLocaleDateString()
+        });
+        
+        // Clear active listing data
         activeListings.delete(interaction.user.id);
         botStats.profilesListed++;
         botStats.messagesSent++;
         
         // Send confirmation
         const confirmEmbed = new EmbedBuilder()
-            .setTitle('✅ Listing Created Successfully!')
-            .setDescription(`Your ${listingData.type} listing has been posted!\n\n` +
+            .setTitle('✅ Account Listed Successfully!')
+            .setDescription(`Your ${listingData.type} has been listed!\n\n` +
                 `**Title:** ${listingData.title}\n` +
-                `**Price:** ${listingData.price} USD\n` +
-                `**Payment Methods:** ${listingData.paymentMethods.join(', ')}\n\n` +
-                `View your listing: ${listingMessage.url}`)
+                `**Price:** $${listingData.price} USD\n` +
+                `**Worth:** $${listingData.worth}\n` +
+                `**Payment Methods:** ${listingData.paymentMethods.join(', ')}\n` +
+                `**Owner:** <@${listingData.ownerId}>\n\n` +
+                `**Channel:** ${listingChannel}\n` +
+                `**Direct Link:** ${listingMessage.url}`)
             .setColor('#00ff00')
             .setFooter({ text: 'David\'s Coins - Listing Confirmation' });
         
@@ -420,7 +663,7 @@ async function createListing(interaction, listingData) {
         });
         
     } catch (error) {
-        console.error('Error creating listing:', error);
+        console.error('Error creating account listing:', error);
         activeListings.delete(interaction.user.id);
         await safeReply(interaction, {
             content: '❌ Error creating listing. Please try again later.',
@@ -429,4 +672,4 @@ async function createListing(interaction, listingData) {
     }
 }
 
-module.exports = { handleButtonInteractions };
+module.exports = { handleButtonInteractions, createAccountListing, completedListings };
