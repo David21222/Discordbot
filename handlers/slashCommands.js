@@ -15,26 +15,10 @@ async function handleSlashCommands(interaction) {
             return;
         }
         
-        // Check if user already has an active listing and clear if expired
-        const existingListing = activeListings.get(interaction.user.id);
-        if (existingListing) {
-            // Check if listing is older than 30 minutes
-            const now = Date.now();
-            const listingAge = now - (existingListing.timestamp || 0);
-            const thirtyMinutes = 30 * 60 * 1000;
-            
-            if (listingAge > thirtyMinutes) {
-                // Clear expired listing
-                activeListings.delete(interaction.user.id);
-                console.log(`Cleared expired listing for user ${interaction.user.id}`);
-            } else {
-                // Still active
-                await safeReply(interaction, {
-                    content: '❌ You already have an active listing. Please finish or cancel your current listing first.\n\n*If you believe this is an error, please wait a few minutes and try again.*',
-                    ephemeral: true
-                });
-                return;
-            }
+        // Clear any existing listing for this user first
+        if (activeListings.has(interaction.user.id)) {
+            activeListings.delete(interaction.user.id);
+            console.log(`Cleared existing listing for user ${interaction.user.id}`);
         }
         
         // Create listing type selection embed
@@ -45,7 +29,7 @@ async function handleSlashCommands(interaction) {
                 '**Profile** - Single Skyblock profile on an account\n\n' +
                 'Select the type of listing you want to create:')
             .setColor('#0099ff')
-            .setFooter({ text: 'David\'s Coins - Skyblock Listings • Session expires in 30 minutes' });
+            .setFooter({ text: 'David\'s Coins - Skyblock Listings' });
         
         const typeButtons = new ActionRowBuilder()
             .addComponents(
@@ -67,27 +51,16 @@ async function handleSlashCommands(interaction) {
             ephemeral: true
         });
         
-        // Store initial listing data with extended timeout and better tracking
+        // Store initial listing data - SIMPLIFIED
         const listingData = {
             step: 'type_selection',
             userId: interaction.user.id,
             username: interaction.user.username,
-            timestamp: Date.now(),
-            interactionId: interaction.id,
-            channelId: interaction.channelId
+            startTime: Date.now()
         };
         
         activeListings.set(interaction.user.id, listingData);
-        console.log(`Created new listing session for user ${interaction.user.id} at step: type_selection`);
-        
-        // Clear listing after 30 minutes (backup cleanup)
-        setTimeout(() => {
-            const currentListing = activeListings.get(interaction.user.id);
-            if (currentListing && currentListing.interactionId === interaction.id) {
-                activeListings.delete(interaction.user.id);
-                console.log(`Auto-cleared listing session for user ${interaction.user.id} after 30 minutes`);
-            }
-        }, 30 * 60 * 1000); // 30 minutes
+        console.log(`✅ Created new listing session for ${interaction.user.username} (${interaction.user.id})`);
     }
 }
 
