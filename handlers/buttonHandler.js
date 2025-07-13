@@ -12,25 +12,27 @@ async function handleButtonInteractions(interaction) {
     
     // Handle listing type selection
     if (interaction.customId === 'list_account' || interaction.customId === 'list_profile') {
-        const listingData = activeListings.get(interaction.user.id);
-        if (!listingData) {
-            await safeReply(interaction, {
-                content: '❌ Listing session expired. Please use `/list` again.\n\n*Sessions last 30 minutes. If you just started, please try again.*',
-                ephemeral: true
-            });
-            return;
-        }
+        let listingData = activeListings.get(interaction.user.id);
         
-        console.log(`User ${interaction.user.id} selected ${interaction.customId}, current step: ${listingData.step}`);
+        // Create new session if doesn't exist
+        if (!listingData) {
+            console.log(`⚠️ No session found for ${interaction.user.username}, creating new one`);
+            listingData = {
+                step: 'type_selection',
+                userId: interaction.user.id,
+                username: interaction.user.username,
+                startTime: Date.now()
+            };
+            activeListings.set(interaction.user.id, listingData);
+        }
         
         const listingType = interaction.customId === 'list_account' ? 'account' : 'profile';
         listingData.type = listingType;
         listingData.step = 'details_input';
-        listingData.timestamp = Date.now(); // Update timestamp
         
-        // Update the stored data
+        // Save updated data
         activeListings.set(interaction.user.id, listingData);
-        console.log(`Updated listing session for user ${interaction.user.id} to step: details_input, type: ${listingType}`);
+        console.log(`✅ ${interaction.user.username} selected ${listingType}, step: details_input`);
         
         // Create modal for listing details with account worth field
         const detailsModal = new ModalBuilder()
@@ -82,16 +84,17 @@ async function handleButtonInteractions(interaction) {
     
     // Handle payment method selection
     if (interaction.customId === 'payment_ltc' || interaction.customId === 'payment_paypal' || interaction.customId === 'payment_both') {
-        const listingData = activeListings.get(interaction.user.id);
-        if (!listingData || listingData.step !== 'payment_selection') {
+        let listingData = activeListings.get(interaction.user.id);
+        
+        if (!listingData) {
             await safeReply(interaction, {
-                content: '❌ Listing session expired or invalid step. Please use `/list` again.\n\n*Current step expected: payment_selection*',
+                content: '❌ Session not found. Please use `/list` to start over.',
                 ephemeral: true
             });
             return;
         }
         
-        console.log(`User ${interaction.user.id} selected payment: ${interaction.customId}, current step: ${listingData.step}`);
+        console.log(`💳 ${interaction.user.username} selected payment: ${interaction.customId}`);
         
         let paymentMethods = [];
         let paymentText = '';
@@ -110,11 +113,10 @@ async function handleButtonInteractions(interaction) {
         listingData.paymentMethods = paymentMethods;
         listingData.paymentText = paymentText;
         listingData.step = 'owner_selection';
-        listingData.timestamp = Date.now(); // Update timestamp
         
-        // Update the stored data
+        // Save updated data
         activeListings.set(interaction.user.id, listingData);
-        console.log(`Updated listing session for user ${interaction.user.id} to step: owner_selection, payments: ${paymentMethods.join(', ')}`);
+        console.log(`✅ ${interaction.user.username} payments: ${paymentMethods.join(', ')}, step: owner_selection`);
         
         // Show owner selection modal
         const ownerModal = new ModalBuilder()
