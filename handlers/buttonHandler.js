@@ -15,15 +15,22 @@ async function handleButtonInteractions(interaction) {
         const listingData = activeListings.get(interaction.user.id);
         if (!listingData) {
             await safeReply(interaction, {
-                content: '❌ Listing session expired. Please use `/list` again.',
+                content: '❌ Listing session expired. Please use `/list` again.\n\n*Sessions last 30 minutes. If you just started, please try again.*',
                 ephemeral: true
             });
             return;
         }
         
+        console.log(`User ${interaction.user.id} selected ${interaction.customId}, current step: ${listingData.step}`);
+        
         const listingType = interaction.customId === 'list_account' ? 'account' : 'profile';
         listingData.type = listingType;
         listingData.step = 'details_input';
+        listingData.timestamp = Date.now(); // Update timestamp
+        
+        // Update the stored data
+        activeListings.set(interaction.user.id, listingData);
+        console.log(`Updated listing session for user ${interaction.user.id} to step: details_input, type: ${listingType}`);
         
         // Create modal for listing details with account worth field
         const detailsModal = new ModalBuilder()
@@ -78,11 +85,13 @@ async function handleButtonInteractions(interaction) {
         const listingData = activeListings.get(interaction.user.id);
         if (!listingData || listingData.step !== 'payment_selection') {
             await safeReply(interaction, {
-                content: '❌ Listing session expired. Please use `/list` again.',
+                content: '❌ Listing session expired or invalid step. Please use `/list` again.\n\n*Current step expected: payment_selection*',
                 ephemeral: true
             });
             return;
         }
+        
+        console.log(`User ${interaction.user.id} selected payment: ${interaction.customId}, current step: ${listingData.step}`);
         
         let paymentMethods = [];
         let paymentText = '';
@@ -101,6 +110,11 @@ async function handleButtonInteractions(interaction) {
         listingData.paymentMethods = paymentMethods;
         listingData.paymentText = paymentText;
         listingData.step = 'owner_selection';
+        listingData.timestamp = Date.now(); // Update timestamp
+        
+        // Update the stored data
+        activeListings.set(interaction.user.id, listingData);
+        console.log(`Updated listing session for user ${interaction.user.id} to step: owner_selection, payments: ${paymentMethods.join(', ')}`);
         
         // Show owner selection modal
         const ownerModal = new ModalBuilder()
