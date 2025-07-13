@@ -148,6 +148,29 @@ function createBuyerNotificationEmbed(listingTitle, buyer, contactInfo, message)
         .setTimestamp();
 }
 
+function createAccountInfoEmbed(listingData) {
+    return new EmbedBuilder()
+        .setTitle('Account Information')
+        .setDescription('**Rank**\n(VIP+)\n\n' +
+            '🎯 **Skill Average**    💀 **Catacombs**\n' +
+            '30.12                    31 (5.16M XP)\n\n' +
+            '⚔️ **Slayers**                      🌟 **Level**\n' +
+            '7/6/6/5/0/0                     132.75\n\n' +
+            '💰 **Networth**\n' +
+            '51.60M (22.19M + 0.09 Coins)\n' +
+            '7.04M Soulbound\n\n' +
+            '🏔️ **HOTM**\n' +
+            '⛏️ Heart of the Mountain: 0\n' +
+            '💎 Mithril Powder: 186.35K\n' +
+            '💎 Gemstone Powder: 1.2K\n' +
+            '💎 Glacite Powder: 0\n\n' +
+            `💰 **Price**\n${listingData.price}$\n\n` +
+            `💳 **Payment Method(s)**\n${listingData.paymentText}`)
+        .setColor('#9d4edd')
+        .setFooter({ text: 'Made by noemi | https://noemi.dev' })
+        .setThumbnail('https://crafatar.com/avatars/steve?overlay');
+}
+
 module.exports = {
     createInfoEmbed,
     createCryptoEmbed,
@@ -156,5 +179,6 @@ module.exports = {
     createPaymentsEmbed,
     createHelpEmbed,
     createListingEmbed,
-    createBuyerNotificationEmbed
+    createBuyerNotificationEmbed,
+    createAccountInfoEmbed
 };
