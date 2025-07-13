@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { hasStaffRole, safeReply, parseAmount, calculatePrice, formatNumber } = require('../utils/utils');
 const { activeListings, activeTickets, ticketMessages, botStats } = require('../utils/stats');
 const { createListingEmbed, createBuyerNotificationEmbed } = require('../utils/embeds');
@@ -119,7 +119,6 @@ async function handleButtonInteractions(interaction) {
         console.log(`✅ ${interaction.user.username} payments: ${paymentMethods.join(', ')}, step: owner_selection`);
         
         // Show owner selection modal
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
         const ownerModal = new ModalBuilder()
             .setCustomId('owner_selection')
             .setTitle('Set Account Owner');
