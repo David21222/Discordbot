@@ -54,12 +54,20 @@ async function handleSlashCommands(interaction) {
             ephemeral: true
         });
         
-        // Store initial listing data
+        // Store initial listing data with extended timeout
         activeListings.set(interaction.user.id, {
             step: 'type_selection',
             userId: interaction.user.id,
-            username: interaction.user.username
+            username: interaction.user.username,
+            timestamp: Date.now() // Add timestamp for debugging
         });
+        
+        // Clear old listings after 30 minutes instead of on restart
+        setTimeout(() => {
+            if (activeListings.has(interaction.user.id)) {
+                activeListings.delete(interaction.user.id);
+            }
+        }, 30 * 60 * 1000); // 30 minutes
     }
 }
 
