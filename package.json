@@ -1,12 +1,30 @@
 {
   "name": "davids-coins-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "description": "Professional Discord bot for David's Coins - Skyblock trading and marketplace",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
   },
+  "keywords": [
+    "discord",
+    "bot",
+    "skyblock",
+    "trading",
+    "marketplace",
+    "cryptocurrency"
+  ],
+  "author": "David's Coins",
+  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.21.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.9.0"
   }
 }
