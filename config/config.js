@@ -53,46 +53,4 @@ module.exports = {
     CRYPTO_WALLETS,
     EMOJIS,
     prices
-};1393744189187166279';
-const PROFILE_CHANNEL_ID = '1393744763131400323';
-
-// Cryptocurrency wallet addresses
-const CRYPTO_WALLETS = {
-    BTC: '3PAfW9MqE5xkHrAwE2HmTPgzRziotiugNu',
-    ETH: '0x753488DE45f33047806ac23B2693d87167829E08',
-    LTC: 'MKJxhQMSg6oAhEXwLukRJvzsWpgQuokf43',
-    USDT: '0xC41199c503C615554fA97803db6a688685e567D5'
-};
-
-// Custom emoji IDs - UPDATED WITH PAYPAL EMOJI
-const EMOJIS = {
-    LTC: '<:LTC:1387494812269412372>',
-    BTC: '<:BTC:1387494854497669242>',
-    ETH: '<:ETH:1387494868531675226>',
-    USDT: '<:USDT:1387494839855218798>',
-    SKYBLOCK: '<:skyblock_level:1393120347427049585>',
-    PAYPAL: '<:paypal:1393746529101156383>'
-};
-
-// Pricing structure
-let prices = {
-    buyUnder1B: 0.04,
-    buyOver1B: 0.035,
-    sell: 0.02
-};
-
-module.exports = {
-    TOKEN,
-    CLIENT_ID,
-    GUILD_ID,
-    TICKET_CATEGORY_ID,
-    STAFF_ROLE_ID,
-    VERIFIED_ROLE_ID,
-    TRANSCRIPT_CHANNEL_ID,
-    OWNER_USER_ID,
-    PROFILE_CATEGORY_ID,
-    PROFILE_CHANNEL_ID,
-    CRYPTO_WALLETS,
-    EMOJIS,
-    prices
 };
