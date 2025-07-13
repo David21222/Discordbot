@@ -23,7 +23,7 @@ async function handleModalSubmissions(interaction) {
         const guild = interaction.guild;
         const category = guild.channels.cache.get(config.TICKET_CATEGORY_ID);
         
-        const channelName = `account-purchase-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+        const channelName = `account-purchase-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}${Date.now().toString().slice(-4)}`;
         
         try {
             const ticketChannel = await guild.channels.create({
@@ -60,9 +60,10 @@ async function handleModalSubmissions(interaction) {
                     `**Next Steps:**\n` +
                     `• Seller and buyer discuss transaction details\n` +
                     `• Payment is processed\n` +
-                    `• Account access is transferred`)
+                    `• Account access is transferred\n\n` +
+                    `**Purchase request created at ${new Date().toLocaleString()}**`)
                 .setColor('#00ff00')
-                .setFooter({ text: `Purchase request created at ${new Date().toLocaleString()}` });
+                .setFooter({ text: 'David\'s Coins - Account Purchase' });
             
             const closeButton = new ActionRowBuilder()
                 .addComponents(
@@ -132,60 +133,6 @@ async function handleModalSubmissions(interaction) {
         } catch (error) {
             await safeReply(interaction, {
                 content: '❌ Invalid user ID or mention. Please provide a valid Discord user.',
-                ephemeral: true
-            });
-        }
-        return;
-    }
-    
-    // Handle buy listing modal
-    if (interaction.customId === 'buy_listing_modal') {
-        const contactInfo = interaction.fields.getTextInputValue('contact_info');
-        const buyerMessage = interaction.fields.getTextInputValue('buyer_message') || 'No additional message';
-        
-        // Get the original listing message
-        const listingEmbed = interaction.message.embeds[0];
-        const listingTitle = listingEmbed.title;
-        const listingDescription = listingEmbed.description;
-        
-        // Extract seller info from the listing
-        const sellerMatch = listingDescription.match(/\*\*👤 Seller:\*\* <@(\d+)>/);
-        const sellerId = sellerMatch ? sellerMatch[1] : null;
-        
-        if (!sellerId) {
-            await safeReply(interaction, {
-                content: '❌ Could not identify the seller. Please contact staff for assistance.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        // Create notification embed for seller
-        const buyerNotification = createBuyerNotificationEmbed(listingTitle, interaction.user, contactInfo, buyerMessage);
-        
-        // Try to send DM to seller
-        try {
-            const seller = await interaction.client.users.fetch(sellerId);
-            await seller.send({ embeds: [buyerNotification] });
-            
-            await safeReply(interaction, {
-                content: '✅ Your interest has been sent to the seller! They will contact you soon using the information you provided.',
-                ephemeral: true
-            });
-        } catch (error) {
-            console.error('Could not send DM to seller:', error);
-            
-            // If DM fails, post in the profile channel
-            const profileChannel = interaction.client.channels.cache.get(config.PROFILE_CHANNEL_ID);
-            if (profileChannel) {
-                await profileChannel.send({
-                    content: `<@${sellerId}> - Someone wants to buy your listing!`,
-                    embeds: [buyerNotification]
-                });
-            }
-            
-            await safeReply(interaction, {
-                content: '✅ Your interest has been recorded! The seller has been notified and will contact you soon.',
                 ephemeral: true
             });
         }
@@ -314,7 +261,7 @@ async function handleModalSubmissions(interaction) {
         const guild = interaction.guild;
         const category = guild.channels.cache.get(config.TICKET_CATEGORY_ID);
         
-        const channelName = `ticket-${minecraftUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+        const channelName = `ticket-${minecraftUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}${Date.now().toString().slice(-4)}`;
         
         try {
             const ticketChannel = await guild.channels.create({
