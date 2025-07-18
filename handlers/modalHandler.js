@@ -8,7 +8,23 @@ async function handleModalSubmissions(interaction) {
     // Handle buy account modal
     if (interaction.customId === 'buy_account_modal') {
         const { completedListings } = require('./buttonHandler');
-        const listingData = completedListings.get(interaction.message.id);
+        
+        // Try multiple ways to find listing data
+        let listingData = completedListings.get(interaction.channel.id) || 
+                         completedListings.get(`channel-${interaction.channel.id}`) ||
+                         completedListings.get(interaction.message.id) ||
+                         completedListings.get(`message-${interaction.message.id}`);
+        
+        // If still not found, search through all listings
+        if (!listingData) {
+            for (const [key, data] of completedListings.entries()) {
+                if (data.channelId === interaction.channel.id) {
+                    listingData = data;
+                    break;
+                }
+            }
+        }
+        
         if (!listingData) {
             await safeReply(interaction, {
                 content: '❌ Could not find listing data.',
