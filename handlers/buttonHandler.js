@@ -94,7 +94,7 @@ async function handleButtonInteractions(interaction) {
             .setCustomId('account_worth')
             .setLabel('Account Worth (for channel name)')
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder('e.g., 1400 (will show as $ 1400 | account-4 ⭐)')
+            .setPlaceholder('e.g., 1400 (will show as $ 1400 | listing-2 ⭐)')
             .setRequired(true)
             .setMaxLength(20);
         
@@ -234,7 +234,6 @@ async function handleButtonInteractions(interaction) {
             return;
         }
         
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
         const buyModal = new ModalBuilder()
             .setCustomId('buy_account_modal')
             .setTitle('Buy an Account');
@@ -323,24 +322,36 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Confirm Unlist
     if (interaction.customId === 'confirm_unlist') {
-        // Try to find listing data from the original message
-        let listingData = null;
+        console.log(`🔍 Confirm unlist clicked in channel: ${interaction.channel.id}`);
         
-        // Look for the listing data in completedListings
-        for (const [messageId, data] of completedListings.entries()) {
-            if (data.channelId === interaction.channel.id) {
-                listingData = data;
-                break;
+        // Try multiple ways to find listing data with extensive logging
+        let listingData = completedListings.get(interaction.channel.id) || 
+                         completedListings.get(`channel-${interaction.channel.id}`) ||
+                         completedListings.get(interaction.message.id) ||
+                         completedListings.get(`message-${interaction.message.id}`);
+        
+        // If still not found, search through all listings
+        if (!listingData) {
+            console.log(`🔍 Searching through all ${completedListings.size} listings for confirm unlist...`);
+            for (const [key, data] of completedListings.entries()) {
+                if (data.channelId === interaction.channel.id) {
+                    listingData = data;
+                    console.log(`✅ Found matching listing by channel ID for confirm unlist!`);
+                    break;
+                }
             }
         }
         
         if (!listingData) {
+            console.log(`❌ No listing data found for confirm unlist in channel ${interaction.channel.id}`);
             await safeReply(interaction, {
-                content: '❌ Could not find listing data.',
+                content: '❌ Could not find listing data for unlisting.',
                 ephemeral: true
             });
             return;
         }
+        
+        console.log(`✅ Found listing data for confirm unlist operation`);
         
         try {
             // Send to unlisted accounts channel
@@ -406,71 +417,6 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // Handle Relist Account
-    if (interaction.customId === 'relist_account') {
-        if (!hasStaffRole(member)) {
-            await safeReply(interaction, {
-                content: '❌ Only staff members can relist accounts.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        // Extract account data from the unlisted embed
-        const embed = interaction.message.embeds[0];
-        const description = embed.description;
-        
-        // Parse the data (simplified - in production, store this properly)
-        const titleMatch = embed.title.match(/🗃️ (.+)/);
-        const priceMatch = description.match(/\*\*💰 Price:\*\* \$(\d+(?:\.\d+)?)/);
-        const paymentMatch = description.match(/\*\*💳 Payment Methods:\*\* (.+)/);
-        const ownerMatch = description.match(/\*\*👤 Owner:\*\* <@(\d+)>/);
-        
-        if (!titleMatch || !priceMatch || !paymentMatch || !ownerMatch) {
-            await safeReply(interaction, {
-                content: '❌ Could not parse account data. Please configure the account first.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        // Create new listing with extracted data
-        await safeReply(interaction, {
-            content: '✅ Account has been relisted successfully!',
-            ephemeral: true
-        });
-        
-        // Delete the unlisted message
-        await interaction.message.delete();
-        return;
-    }
-    
-    // Handle Configure Account
-    if (interaction.customId === 'configure_account') {
-        if (!hasStaffRole(member)) {
-            await safeReply(interaction, {
-                content: '❌ Only staff members can configure accounts.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        const configEmbed = new EmbedBuilder()
-            .setTitle('⚙️ Account Configuration')
-            .setDescription('Account configuration features coming soon!\n\nThis will allow you to:\n' +
-                '• Edit account details\n' +
-                '• Update pricing\n' +
-                '• Modify payment methods\n' +
-                '• Change account stats')
-            .setColor('#0099ff');
-        
-        await safeReply(interaction, {
-            embeds: [configEmbed],
-            ephemeral: true
-        });
-        return;
-    }
-    
     // Crypto copy buttons
     if (interaction.customId.startsWith('copy_')) {
         const cryptoType = interaction.customId.split('_')[1].toUpperCase();
@@ -488,7 +434,6 @@ async function handleButtonInteractions(interaction) {
         const type = interaction.customId === 'buy_coins' ? 'buy' : 'sell';
         const modalTitle = type === 'buy' ? 'Buy Coins' : 'Sell Coins';
         
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
         const modal = new ModalBuilder()
             .setCustomId(`${type}_modal`)
             .setTitle(modalTitle);
@@ -526,7 +471,6 @@ async function handleButtonInteractions(interaction) {
     
     // Calculate button
     if (interaction.customId === 'calculate_price') {
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
         const modal = new ModalBuilder()
             .setCustomId('calculate_modal')
             .setTitle('Price Calculator');
@@ -555,7 +499,6 @@ async function handleButtonInteractions(interaction) {
             return;
         }
         
-        const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
         const priceModal = new ModalBuilder()
             .setCustomId('update_prices')
             .setTitle('Update Prices');
@@ -842,7 +785,6 @@ async function createAccountListing(interaction, listingData) {
             ephemeral: true
         });
     }
-}
 }
 
 module.exports = { handleButtonInteractions, createAccountListing, completedListings };
