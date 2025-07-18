@@ -10,6 +10,33 @@ const completedListings = new Map(); // messageId -> fullListingData
 async function handleButtonInteractions(interaction) {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     
+    // Handle Toggle Ping button
+    if (interaction.customId === 'toggle_ping') {
+        await safeReply(interaction, {
+            content: '🔔 **Toggle Ping**\n\nYou will be notified if the price drops on this listing!\n\n*This feature is currently in development.*',
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle Extra Information button
+    if (interaction.customId === 'extra_information') {
+        await safeReply(interaction, {
+            content: '📋 **Extra Information**\n\nNone',
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle Pricing button
+    if (interaction.customId === 'pricing_info') {
+        await safeReply(interaction, {
+            content: '💸 **Pricing**\n\nGreat Value!',
+            ephemeral: true
+        });
+        return;
+    }
+    
     // Handle listing type selection
     if (interaction.customId === 'list_account' || interaction.customId === 'list_profile') {
         let listingData = activeListings.get(interaction.user.id);
@@ -142,7 +169,9 @@ async function handleButtonInteractions(interaction) {
     if (interaction.customId === 'account_owner') {
         // Try multiple ways to find listing data
         let listingData = completedListings.get(interaction.channel.id) || 
-                         completedListings.get(interaction.message.id);
+                         completedListings.get(`channel-${interaction.channel.id}`) ||
+                         completedListings.get(interaction.message.id) ||
+                         completedListings.get(`message-${interaction.message.id}`);
         
         // If still not found, search through all listings
         if (!listingData) {
@@ -181,7 +210,9 @@ async function handleButtonInteractions(interaction) {
     if (interaction.customId === 'buy_account') {
         // Try multiple ways to find listing data
         let listingData = completedListings.get(interaction.channel.id) || 
-                         completedListings.get(interaction.message.id);
+                         completedListings.get(`channel-${interaction.channel.id}`) ||
+                         completedListings.get(interaction.message.id) ||
+                         completedListings.get(`message-${interaction.message.id}`);
         
         // If still not found, search through all listings
         if (!listingData) {
@@ -225,30 +256,38 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Unlist button (owner only)
     if (interaction.customId === 'unlist_account') {
-        // Try multiple ways to find listing data
+        console.log(`🔍 Unlist button clicked in channel: ${interaction.channel.id}`);
+        console.log(`🔍 Available listing keys:`, Array.from(completedListings.keys()));
+        
+        // Try multiple ways to find listing data with extensive logging
         let listingData = completedListings.get(interaction.channel.id) || 
-                         completedListings.get(interaction.message.id);
+                         completedListings.get(`channel-${interaction.channel.id}`) ||
+                         completedListings.get(interaction.message.id) ||
+                         completedListings.get(`message-${interaction.message.id}`);
         
         // If still not found, search through all listings
         if (!listingData) {
+            console.log(`🔍 Searching through all ${completedListings.size} listings...`);
             for (const [key, data] of completedListings.entries()) {
+                console.log(`🔍 Checking key: ${key}, channelId: ${data.channelId}`);
                 if (data.channelId === interaction.channel.id) {
                     listingData = data;
+                    console.log(`✅ Found matching listing by channel ID!`);
                     break;
                 }
             }
         }
         
-        console.log(`Unlist button: Found data: ${!!listingData}, Channel: ${interaction.channel.id}`);
-        console.log(`Available listings:`, Array.from(completedListings.keys()));
-        
         if (!listingData) {
+            console.log(`❌ No listing data found for channel ${interaction.channel.id}`);
             await safeReply(interaction, {
-                content: '❌ Could not find listing data. Debug info sent to console.',
+                content: `❌ Could not find listing data.\n\n**Debug Info:**\n- Channel ID: ${interaction.channel.id}\n- Total listings: ${completedListings.size}\n- Available keys: ${Array.from(completedListings.keys()).slice(0, 5).join(', ')}...`,
                 ephemeral: true
             });
             return;
         }
+        
+        console.log(`✅ Found listing data for unlist operation`);
         
         // Check if user is the owner
         if (interaction.user.id !== listingData.ownerId) {
@@ -753,25 +792,23 @@ async function createAccountListing(interaction, listingData) {
         });
         
         // Store completed listing data with BOTH message ID and channel ID for backup
-        const listingKey = `${listingChannel.id}-${listingMessage.id}`;
-        completedListings.set(listingMessage.id, {
+        const listingDataWithIds = {
             ...listingData,
             messageId: listingMessage.id,
             channelId: listingChannel.id,
             listedDate: new Date().toLocaleDateString(),
             channelName: channelName
-        });
+        };
         
-        // Also store by channel ID for easier lookup
-        completedListings.set(listingChannel.id, {
-            ...listingData,
-            messageId: listingMessage.id,
-            channelId: listingChannel.id,
-            listedDate: new Date().toLocaleDateString(),
-            channelName: channelName
-        });
+        // Store by multiple keys for redundancy
+        completedListings.set(listingMessage.id, listingDataWithIds);
+        completedListings.set(listingChannel.id, listingDataWithIds);
+        completedListings.set(`channel-${listingChannel.id}`, listingDataWithIds);
+        completedListings.set(`message-${listingMessage.id}`, listingDataWithIds);
         
         console.log(`✅ Stored listing data for channel: ${listingChannel.id} and message: ${listingMessage.id}`);
+        console.log(`✅ Total listings stored: ${completedListings.size}`);
+        console.log(`✅ Available keys:`, Array.from(completedListings.keys()));
         
         // Clear active listing data
         activeListings.delete(interaction.user.id);
