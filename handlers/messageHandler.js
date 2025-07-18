@@ -165,6 +165,40 @@ async function handleMessageCommands(client, message) {
             return;
         }
         
+        if (command === 'pp') {
+            const paypalEmbed = new EmbedBuilder()
+                .setTitle('💳 PayPal Payment Instructions')
+                .setDescription('**Follow these steps to complete your PayPal payment:**\n\n' +
+                    '**📧 PayPal Email Address:**\n' +
+                    '`D.Dovganyuk2409@gmail.com`\n\n' +
+                    '**📋 Payment Steps:**\n' +
+                    '**1.** 📹 Record yourself sending the money to the email address\n' +
+                    '**2.** 💰 Make sure you send from your PayPal balance (not debit/credit card)\n' +
+                    '**3.** 📸 Send screenshot of the payment receipt\n\n' +
+                    '**⚠️ Important Notes:**\n' +
+                    '• Send as **Friends & Family** to avoid fees\n' +
+                    '• Include your Discord username in the payment note\n' +
+                    '• Wait for payment confirmation before expecting delivery\n\n' +
+                    '**Need Help?** Contact our support team if you have any questions!')
+                .setColor('#0070ba')
+                .setFooter({ text: 'David\'s Coins - Secure PayPal Payments' })
+                .setThumbnail('https://i.imgur.com/Cq8JdC5.png') // PayPal logo
+                .setTimestamp();
+            
+            const paypalButton = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('copy_paypal_email')
+                        .setLabel('Copy PayPal Email')
+                        .setStyle(ButtonStyle.Primary)
+                        .setEmoji('📧')
+                );
+            
+            await message.channel.send({ embeds: [paypalEmbed], components: [paypalButton] });
+            botStats.messagesSent++;
+            return;
+        }
+        
         // Staff-only commands
         if (!hasStaffRole(member)) {
             await message.channel.send('❌ This command requires staff permissions.').then(msg => {
