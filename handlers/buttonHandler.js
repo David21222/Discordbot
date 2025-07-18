@@ -140,7 +140,22 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Account Owner button
     if (interaction.customId === 'account_owner') {
-        const listingData = completedListings.get(interaction.message.id);
+        // Try multiple ways to find listing data
+        let listingData = completedListings.get(interaction.channel.id) || 
+                         completedListings.get(interaction.message.id);
+        
+        // If still not found, search through all listings
+        if (!listingData) {
+            for (const [key, data] of completedListings.entries()) {
+                if (data.channelId === interaction.channel.id) {
+                    listingData = data;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`Account Owner button: Found data: ${!!listingData}, Channel: ${interaction.channel.id}`);
+        
         if (!listingData) {
             await safeReply(interaction, {
                 content: '❌ Could not find listing data.',
@@ -164,7 +179,22 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Buy button
     if (interaction.customId === 'buy_account') {
-        const listingData = completedListings.get(interaction.message.id);
+        // Try multiple ways to find listing data
+        let listingData = completedListings.get(interaction.channel.id) || 
+                         completedListings.get(interaction.message.id);
+        
+        // If still not found, search through all listings
+        if (!listingData) {
+            for (const [key, data] of completedListings.entries()) {
+                if (data.channelId === interaction.channel.id) {
+                    listingData = data;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`Buy button: Found data: ${!!listingData}, Channel: ${interaction.channel.id}`);
+        
         if (!listingData) {
             await safeReply(interaction, {
                 content: '❌ Could not find listing data.',
@@ -195,10 +225,26 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Unlist button (owner only)
     if (interaction.customId === 'unlist_account') {
-        const listingData = completedListings.get(interaction.message.id);
+        // Try multiple ways to find listing data
+        let listingData = completedListings.get(interaction.channel.id) || 
+                         completedListings.get(interaction.message.id);
+        
+        // If still not found, search through all listings
+        if (!listingData) {
+            for (const [key, data] of completedListings.entries()) {
+                if (data.channelId === interaction.channel.id) {
+                    listingData = data;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`Unlist button: Found data: ${!!listingData}, Channel: ${interaction.channel.id}`);
+        console.log(`Available listings:`, Array.from(completedListings.keys()));
+        
         if (!listingData) {
             await safeReply(interaction, {
-                content: '❌ Could not find listing data.',
+                content: '❌ Could not find listing data. Debug info sent to console.',
                 ephemeral: true
             });
             return;
@@ -238,7 +284,17 @@ async function handleButtonInteractions(interaction) {
     
     // Handle Confirm Unlist
     if (interaction.customId === 'confirm_unlist') {
-        const listingData = completedListings.get(interaction.message.id);
+        // Try to find listing data from the original message
+        let listingData = null;
+        
+        // Look for the listing data in completedListings
+        for (const [messageId, data] of completedListings.entries()) {
+            if (data.channelId === interaction.channel.id) {
+                listingData = data;
+                break;
+            }
+        }
+        
         if (!listingData) {
             await safeReply(interaction, {
                 content: '❌ Could not find listing data.',
@@ -594,11 +650,10 @@ async function createAccountListing(interaction, listingData) {
     try {
         const guild = interaction.guild;
         
-        // Determine category based on listing type
-        const categoryId = listingData.type === 'account' ? config.PROFILE_CATEGORY_ID : config.PROFILE_CHANNEL_ID;
-        const category = guild.channels.cache.get(categoryId);
+        // Use the correct category ID for listings
+        const categoryId = config.PROFILE_CATEGORY_ID; // This should be 1393744189187166279
         
-        if (!category) {
+        if (!categoryId) {
             await safeReply(interaction, {
                 content: '❌ Listing category not found. Please contact an administrator.',
                 ephemeral: true
@@ -606,9 +661,11 @@ async function createAccountListing(interaction, listingData) {
             return;
         }
         
-        // Create the channel name in the format: $ 1400 | account-4 ⭐
-        const randomNumber = Math.floor(Math.random() * 9) + 1;
-        const channelName = `$ ${listingData.worth} | ${listingData.type}-${randomNumber} ⭐`;
+        // Create the channel name in the format: $ 1500 | listing-2 ⭐ (like your images)
+        const randomNumber = Math.floor(Math.random() * 20) + 1;
+        const channelName = `$ ${listingData.worth} | listing-${randomNumber} ⭐`;
+        
+        console.log(`Creating channel: ${channelName} in category: ${categoryId}`);
         
         // Create the listing channel
         const listingChannel = await guild.channels.create({
@@ -647,8 +704,8 @@ async function createAccountListing(interaction, listingData) {
                 `💰 **Price**\n${listingData.price}$\n\n` +
                 `💳 **Payment Method(s)**\n${listingData.paymentText}`)
             .setColor('#9d4edd')
-            .setFooter({ text: 'Made by noemi | https://noemi.dev' })
-            .setThumbnail('https://crafatar.com/avatars/steve?overlay'); // Placeholder avatar
+            .setFooter({ text: 'Made by Gulubero' })
+            .setThumbnail('https://crafatar.com/avatars/steve?overlay');
         
         // Create action buttons matching your design
         const actionButtons1 = new ActionRowBuilder()
@@ -695,13 +752,26 @@ async function createAccountListing(interaction, listingData) {
             components: [actionButtons1, actionButtons2]
         });
         
-        // Store completed listing data
+        // Store completed listing data with BOTH message ID and channel ID for backup
+        const listingKey = `${listingChannel.id}-${listingMessage.id}`;
         completedListings.set(listingMessage.id, {
             ...listingData,
             messageId: listingMessage.id,
             channelId: listingChannel.id,
-            listedDate: new Date().toLocaleDateString()
+            listedDate: new Date().toLocaleDateString(),
+            channelName: channelName
         });
+        
+        // Also store by channel ID for easier lookup
+        completedListings.set(listingChannel.id, {
+            ...listingData,
+            messageId: listingMessage.id,
+            channelId: listingChannel.id,
+            listedDate: new Date().toLocaleDateString(),
+            channelName: channelName
+        });
+        
+        console.log(`✅ Stored listing data for channel: ${listingChannel.id} and message: ${listingMessage.id}`);
         
         // Clear active listing data
         activeListings.delete(interaction.user.id);
@@ -713,8 +783,8 @@ async function createAccountListing(interaction, listingData) {
             .setTitle('✅ Account Listed Successfully!')
             .setDescription(`Your ${listingData.type} has been listed!\n\n` +
                 `**Title:** ${listingData.title}\n` +
-                `**Price:** $${listingData.price} USD\n` +
-                `**Worth:** $${listingData.worth}\n` +
+                `**Price:** ${listingData.price} USD\n` +
+                `**Worth:** ${listingData.worth}\n` +
                 `**Payment Methods:** ${listingData.paymentMethods.join(', ')}\n` +
                 `**Owner:** <@${listingData.ownerId}>\n\n` +
                 `**Channel:** ${listingChannel}\n` +
@@ -735,6 +805,7 @@ async function createAccountListing(interaction, listingData) {
             ephemeral: true
         });
     }
+}
 }
 
 module.exports = { handleButtonInteractions, createAccountListing, completedListings };
