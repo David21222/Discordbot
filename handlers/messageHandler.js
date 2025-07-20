@@ -500,6 +500,87 @@ async function handleMessageCommands(client, message) {
             return;
         }
         
+        // Manual history command (Staff only)
+        if (command === 'hc') {
+            if (!hasStaffRole(member)) {
+                await message.channel.send('❌ This command requires staff permissions.').then(msg => {
+                    setTimeout(() => safeDeleteMessage(msg), 5000);
+                });
+                return;
+            }
+            
+            let targetUser = null;
+            
+            // Check if user mentioned someone or provided ID
+            if (message.mentions.users.size > 0) {
+                targetUser = message.mentions.users.first();
+            } else if (args[1]) {
+                try {
+                    targetUser = await message.client.users.fetch(args[1]);
+                } catch (error) {
+                    await message.channel.send('❌ User not found. Use `!hc @user` or `!hc userID`.').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+            } else {
+                await message.channel.send('❌ Please specify a user. Use `!hc @user` or `!hc userID`.').then(msg => {
+                    setTimeout(() => safeDeleteMessage(msg), 5000);
+                });
+                return;
+            }
+            
+            // Get existing history
+            const userProfile = getUser(targetUser.id);
+            const existingHistory = getUserHistory(targetUser.id, 50);
+            
+            let historyText = '';
+            if (existingHistory.length > 0) {
+                existingHistory.forEach((trade, index) => {
+                    const date = new Date(trade.timestamp).toLocaleDateString();
+                    const isUserBuyer = trade.buyerId === targetUser.id;
+                    const emoji = isUserBuyer ? '🛒' : '🏪';
+                    const action = isUserBuyer ? 'Buy' : 'Sell';
+                    const amount = trade.type === 'account_purchase' ? 'Account' : formatNumber(trade.amount);
+                    
+                    historyText += `${emoji} ${action} ${amount} - ${formatCurrency(trade.price)} - ${date}\n`;
+                });
+            } else {
+                historyText = '*No trading history found*';
+            }
+            
+            const historyEmbed = new EmbedBuilder()
+                .setTitle(`📜 Manual History Configuration`)
+                .setDescription(`**User:** ${targetUser} (${targetUser.username})\n` +
+                    `**User ID:** ${targetUser.id}\n\n` +
+                    `**Current Trading History:**\n${historyText}\n\n` +
+                    `**Options:**\n` +
+                    `✅ **Confirm** - History is correct as shown\n` +
+                    `🔧 **Configure** - Add manual trading history`)
+                .setColor('#0099ff')
+                .setThumbnail(targetUser.displayAvatarURL())
+                .setFooter({ text: 'David\'s Coins - Manual History Management' })
+                .setTimestamp();
+            
+            const historyButtons = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`history_confirm_${targetUser.id}`)
+                        .setLabel('Confirm History')
+                        .setStyle(ButtonStyle.Success)
+                        .setEmoji('✅'),
+                    new ButtonBuilder()
+                        .setCustomId(`history_configure_${targetUser.id}`)
+                        .setLabel('Configure')
+                        .setStyle(ButtonStyle.Primary)
+                        .setEmoji('🔧')
+                );
+            
+            await message.channel.send({ embeds: [historyEmbed], components: [historyButtons] });
+            botStats.messagesSent++;
+            return;
+        }
+        
         // Staff-only commands
         if (!hasStaffRole(member)) {
             await message.channel.send('❌ This command requires staff permissions.').then(msg => {
