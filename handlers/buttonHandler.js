@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType,
 const { hasStaffRole, safeReply, parseAmount, calculatePrice, formatNumber } = require('../utils/utils');
 const { activeListings, activeTickets, ticketMessages, botStats } = require('../utils/stats');
 const { createListingEmbed, createBuyerNotificationEmbed } = require('../utils/embeds');
+const { addTrade, formatCurrency } = require('../utils/database');
 const config = require('../config/config');
 
 // Store completed listings (in production, use a database)
@@ -549,7 +550,7 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // Close ticket button - UPDATED TO HANDLE ACCOUNT TICKETS
+    // Close ticket button - COMPLETELY REDESIGNED SYSTEM
     if (interaction.customId === 'confirm_close') {
         if (!hasStaffRole(member)) {
             await safeReply(interaction, {
@@ -569,73 +570,332 @@ async function handleButtonInteractions(interaction) {
             return;
         }
         
+        // Extract ticket information from channel messages
+        const messages = ticketMessages.get(channel.id) || [];
+        let ticketInfo = null;
+        
+        // Find the original ticket creation message
+        for (const msg of messages) {
+            if (msg.author === 'David\'s Coins [BOT]' && msg.content.includes('Ticket created for')) {
+                // Parse the ticket info
+                const isAccountPurchase = channel.name.startsWith('account-purchase-');
+                if (isAccountPurchase) {
+                    // Handle account purchase tickets differently
+                    ticketInfo = {
+                        type: 'account_purchase',
+                        amount: 'Account',
+                        price: 0, // Will be set in configure modal
+                        buyerId: null,
+                        sellerId: null,
+                        paymentMethod: 'Unknown'
+                    };
+                } else {
+                    // Parse coin trading ticket
+                    const content = msg.content;
+                    const amountMatch = content.match(/(\d+(?:\.\d+)?[KMB]?) coins/i);
+                    const priceMatch = content.match(/\$(\d+(?:\.\d+)?)/);
+                    
+                    ticketInfo = {
+                        type: content.includes('buying') ? 'buy' : 'sell',
+                        amount: amountMatch ? amountMatch[1] : '0',
+                        price: priceMatch ? parseFloat(priceMatch[1]) : 0,
+                        buyerId: null,
+                        sellerId: null,
+                        paymentMethod: 'Unknown'
+                    };
+                }
+                break;
+            }
+        }
+        
+        if (!ticketInfo) {
+            // If we can't parse the ticket, show configure modal
+            const configureModal = new ModalBuilder()
+                .setCustomId('ticket_configure_close')
+                .setTitle('Configure Trade Details');
+            
+            const coinsInput = new TextInputBuilder()
+                .setCustomId('trade_coins')
+                .setLabel('Coins Amount (e.g., 1B, 500M, 2.5B)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('e.g., 1B, 500M, 2.5B')
+                .setRequired(true);
+            
+            const priceInput = new TextInputBuilder()
+                .setCustomId('trade_price')
+                .setLabel('Total Price (USD)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('e.g., 35.00')
+                .setRequired(true);
+            
+            const buyerInput = new TextInputBuilder()
+                .setCustomId('trade_buyer')
+                .setLabel('Buyer (User ID or @mention)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('User ID or @mention')
+                .setRequired(true);
+            
+            const sellerInput = new TextInputBuilder()
+                .setCustomId('trade_seller')
+                .setLabel('Seller (User ID or @mention)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('David\'s Coins or User ID')
+                .setRequired(true);
+            
+            const paymentInput = new TextInputBuilder()
+                .setCustomId('trade_payment')
+                .setLabel('Payment Method')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('PayPal, BTC, ETH, LTC, USDT')
+                .setRequired(true);
+            
+            const firstRow = new ActionRowBuilder().addComponents(coinsInput);
+            const secondRow = new ActionRowBuilder().addComponents(priceInput);
+            const thirdRow = new ActionRowBuilder().addComponents(buyerInput);
+            const fourthRow = new ActionRowBuilder().addComponents(sellerInput);
+            const fifthRow = new ActionRowBuilder().addComponents(paymentInput);
+            
+            configureModal.addComponents(firstRow, secondRow, thirdRow, fourthRow, fifthRow);
+            
+            await interaction.showModal(configureModal);
+            return;
+        }
+        
+        // Show trade confirmation embed
+        const confirmEmbed = new EmbedBuilder()
+            .setTitle('💼 Trade Completion Confirmation')
+            .setDescription('**Please confirm the trade details before closing this ticket:**\n\n' +
+                `**Trade Type:** ${ticketInfo.type === 'buy' ? '🛒 Purchase' : ticketInfo.type === 'sell' ? '🏪 Sale' : '🏦 Account Purchase'}\n` +
+                `**Amount:** ${ticketInfo.amount}\n` +
+                `**Price:** ${ticketInfo.price.toFixed(2)} USD\n` +
+                `**Payment Method:** ${ticketInfo.paymentMethod}\n\n` +
+                '**Choose an option:**\n' +
+                '✅ **Confirm** - Details are correct, close ticket and record trade\n' +
+                '🔧 **Configure** - Modify trade details before recording')
+            .setColor('#0099ff')
+            .setFooter({ text: 'David\'s Coins - Trade Completion' })
+            .setTimestamp();
+        
+        const confirmButtons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('trade_confirm_exact')
+                    .setLabel('Confirm Trade')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('✅'),
+                new ButtonBuilder()
+                    .setCustomId('trade_configure')
+                    .setLabel('Configure')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🔧')
+            );
+        
         await safeReply(interaction, {
-            content: '🔒 Generating transcript and closing ticket in 5 seconds...',
+            embeds: [confirmEmbed],
+            components: [confirmButtons],
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle trade confirmation
+    if (interaction.customId === 'trade_confirm_exact') {
+        // Close the ticket and record the trade as-is
+        await finalizeTicketClosure(interaction);
+        return;
+    }
+    
+    // Handle trade configuration
+    if (interaction.customId === 'trade_configure') {
+        const configureModal = new ModalBuilder()
+            .setCustomId('ticket_configure_close')
+            .setTitle('Configure Trade Details');
+        
+        const coinsInput = new TextInputBuilder()
+            .setCustomId('trade_coins')
+            .setLabel('Coins Amount (e.g., 1B, 500M, 2.5B)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., 1B, 500M, 2.5B')
+            .setRequired(true);
+        
+        const priceInput = new TextInputBuilder()
+            .setCustomId('trade_price')
+            .setLabel('Total Price (USD)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., 35.00')
+            .setRequired(true);
+        
+        const buyerInput = new TextInputBuilder()
+            .setCustomId('trade_buyer')
+            .setLabel('Buyer (User ID or @mention)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('User ID or @mention')
+            .setRequired(true);
+        
+        const sellerInput = new TextInputBuilder()
+            .setCustomId('trade_seller')
+            .setLabel('Seller (User ID or @mention)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('David\'s Coins or User ID')
+            .setRequired(true);
+        
+        const paymentInput = new TextInputBuilder()
+            .setCustomId('trade_payment')
+            .setLabel('Payment Method')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('PayPal, BTC, ETH, LTC, USDT')
+            .setRequired(true);
+        
+        const firstRow = new ActionRowBuilder().addComponents(coinsInput);
+        const secondRow = new ActionRowBuilder().addComponents(priceInput);
+        const thirdRow = new ActionRowBuilder().addComponents(buyerInput);
+        const fourthRow = new ActionRowBuilder().addComponents(sellerInput);
+        const fifthRow = new ActionRowBuilder().addComponents(paymentInput);
+        
+        configureModal.addComponents(firstRow, secondRow, thirdRow, fourthRow, fifthRow);
+        
+        await interaction.showModal(configureModal);
+        return;
+    }
+    
+    // Handle history confirmation
+    if (interaction.customId.startsWith('history_confirm_')) {
+        const userId = interaction.customId.split('_')[2];
+        
+        await safeReply(interaction, {
+            content: `✅ History confirmed for user ${userId}. No changes made.`,
+            ephemeral: true
+        });
+        return;
+    }
+    
+    // Handle history configuration
+    if (interaction.customId.startsWith('history_configure_')) {
+        const userId = interaction.customId.split('_')[2];
+        
+        const historyModal = new ModalBuilder()
+            .setCustomId('manual_history_configure')
+            .setTitle('Add Manual Trading History');
+        
+        const userIdInput = new TextInputBuilder()
+            .setCustomId('user_id')
+            .setLabel('User ID')
+            .setStyle(TextInputStyle.Short)
+            .setValue(userId)
+            .setRequired(true);
+        
+        const historyInput = new TextInputBuilder()
+            .setCustomId('trade_history')
+            .setLabel('Trading History (one trade per line)')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Format: buy 500M $20 PayPal 2024-01-15\nsell 1B $35 BTC 2024-01-10\nbuy Account $200 PayPal 2024-01-12')
+            .setRequired(true)
+            .setMaxLength(2000);
+        
+        const firstRow = new ActionRowBuilder().addComponents(userIdInput);
+        const secondRow = new ActionRowBuilder().addComponents(historyInput);
+        
+        historyModal.addComponents(firstRow, secondRow);
+        
+        await interaction.showModal(historyModal);
+        return;
+    }
+}
+
+// Function to finalize ticket closure with trade recording
+async function finalizeTicketClosure(interaction, tradeData = null) {
+    const channel = interaction.channel;
+    
+    try {
+        await safeReply(interaction, {
+            content: '🔒 Recording trade and closing ticket...',
             ephemeral: true
         });
         
+        // Generate transcript
+        const messages = ticketMessages.get(channel.id) || [];
+        const transcriptChannel = interaction.client.channels.cache.get(config.TRANSCRIPT_CHANNEL_ID);
+        
+        if (transcriptChannel && messages.length > 0) {
+            let transcriptText = `TICKET TRANSCRIPT - ${channel.name}\n`;
+            transcriptText += `Created: ${new Date(channel.createdTimestamp).toLocaleString()}\n`;
+            transcriptText += `Channel ID: ${channel.id}\n`;
+            transcriptText += `Total Messages: ${messages.length}\n\n`;
+            
+            if (tradeData) {
+                transcriptText += `--- TRADE DETAILS ---\n`;
+                transcriptText += `Type: ${tradeData.type}\n`;
+                transcriptText += `Amount: ${tradeData.amount}\n`;
+                transcriptText += `Price: ${tradeData.price}\n`;
+                transcriptText += `Buyer: ${tradeData.buyerUsername} (${tradeData.buyerId})\n`;
+                transcriptText += `Seller: ${tradeData.sellerUsername} (${tradeData.sellerId})\n`;
+                transcriptText += `Payment: ${tradeData.paymentMethod}\n\n`;
+            }
+            
+            transcriptText += `--- CONVERSATION ---\n\n`;
+            
+            messages.forEach((msg) => {
+                const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+                transcriptText += `[${timestamp}] ${msg.author}: ${msg.content}\n\n`;
+            });
+            
+            transcriptText += `--- END TRANSCRIPT ---\n`;
+            transcriptText += `Closed by: ${interaction.user.username}\n`;
+            transcriptText += `Closed on: ${new Date().toLocaleString()}\n`;
+            
+            const buffer = Buffer.from(transcriptText, 'utf-8');
+            const attachment = {
+                attachment: buffer,
+                name: `transcript-${channel.name}.txt`
+            };
+            
+            const transcriptEmbed = new EmbedBuilder()
+                .setTitle('📄 Ticket Transcript')
+                .setDescription(`Transcript for ${channel.name}${tradeData ? '\n✅ Trade recorded in database' : ''}`)
+                .addFields(
+                    { name: 'Closed By', value: interaction.user.username, inline: true },
+                    { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
+                )
+                .setColor(tradeData ? '#00ff00' : '#0099ff');
+            
+            if (tradeData) {
+                transcriptEmbed.addFields(
+                    { name: 'Trade Value', value: formatCurrency(tradeData.price), inline: true },
+                    { name: 'Trade Type', value: tradeData.type.toUpperCase(), inline: true }
+                );
+            }
+            
+            await transcriptChannel.send({
+                embeds: [transcriptEmbed],
+                files: [attachment]
+            });
+        }
+        
+        // Clear ticket data and delete channel
+        ticketMessages.delete(channel.id);
+        for (const [userId, channelId] of activeTickets.entries()) {
+            if (channelId === channel.id) {
+                activeTickets.delete(userId);
+                break;
+            }
+        }
+        
+        // Small delay then delete
         setTimeout(async () => {
             try {
-                // Generate transcript
-                const messages = ticketMessages.get(channel.id) || [];
-                const transcriptChannel = interaction.client.channels.cache.get(config.TRANSCRIPT_CHANNEL_ID);
-                
-                if (transcriptChannel && messages.length > 0) {
-                    let transcriptText = `TICKET TRANSCRIPT - ${channel.name}\n`;
-                    transcriptText += `Created: ${new Date(channel.createdTimestamp).toLocaleString()}\n`;
-                    transcriptText += `Channel ID: ${channel.id}\n`;
-                    transcriptText += `Total Messages: ${messages.length}\n\n`;
-                    transcriptText += `--- CONVERSATION ---\n\n`;
-                    
-                    messages.forEach((msg) => {
-                        const timestamp = new Date(msg.timestamp).toLocaleTimeString();
-                        transcriptText += `[${timestamp}] ${msg.author}: ${msg.content}\n\n`;
-                    });
-                    
-                    transcriptText += `--- END TRANSCRIPT ---\n`;
-                    transcriptText += `Closed by: ${interaction.user.username}\n`;
-                    transcriptText += `Closed on: ${new Date().toLocaleString()}\n`;
-                    
-                    const buffer = Buffer.from(transcriptText, 'utf-8');
-                    const attachment = {
-                        attachment: buffer,
-                        name: `transcript-${channel.name}.txt`
-                    };
-                    
-                    const transcriptEmbed = new EmbedBuilder()
-                        .setTitle('📄 Ticket Transcript')
-                        .setDescription(`Transcript for ${channel.name}`)
-                        .addFields(
-                            { name: 'Closed By', value: interaction.user.username, inline: true },
-                            { name: 'Closed At', value: new Date().toLocaleString(), inline: true }
-                        )
-                        .setColor('#0099ff');
-                    
-                    await transcriptChannel.send({
-                        embeds: [transcriptEmbed],
-                        files: [attachment]
-                    });
-                }
-                
-                // Clear ticket data and delete channel
-                ticketMessages.delete(channel.id);
-                for (const [userId, channelId] of activeTickets.entries()) {
-                    if (channelId === channel.id) {
-                        activeTickets.delete(userId);
-                        break;
-                    }
-                }
                 await channel.delete();
-            } catch (error) {
-                console.error('Error generating transcript or deleting channel:', error);
-                try {
-                    await channel.delete();
-                } catch (deleteError) {
-                    console.error('Error deleting ticket channel:', deleteError);
-                }
+            } catch (deleteError) {
+                console.error('Error deleting ticket channel:', deleteError);
             }
-        }, 5000);
-        return;
+        }, 2000);
+        
+    } catch (error) {
+        console.error('Error finalizing ticket closure:', error);
+        try {
+            await channel.delete();
+        } catch (deleteError) {
+            console.error('Error deleting ticket channel:', deleteError);
+        }
     }
 }
 
