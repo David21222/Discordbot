@@ -417,22 +417,25 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // Crypto copy buttons
-    if (interaction.customId.startsWith('copy_')) {
-        const cryptoType = interaction.customId.split('_')[1].toUpperCase();
-        const wallet = config.CRYPTO_WALLETS[cryptoType];
-        
+    // PayPal email copy button
+    if (interaction.customId === 'copy_paypal_email') {
         await safeReply(interaction, {
-            content: `📋 **${cryptoType} Wallet Address:**\n\`${wallet}\`\n\n*Select and copy the address above!*`,
+            content: `📧 **PAYPAL Wallet Address:**\n\`D.Dovganyuk2409@gmail.com\`\n\n*Select and copy the address above!*`,
             ephemeral: true
         });
         return;
     }
     
-    // PayPal email copy button
-    if (interaction.customId === 'copy_paypal_email') {
+    // Crypto copy buttons
+    if (interaction.customId.startsWith('copy_')) {
+        // Skip if it's the PayPal button (already handled above)
+        if (interaction.customId === 'copy_paypal_email') return;
+        
+        const cryptoType = interaction.customId.split('_')[1].toUpperCase();
+        const wallet = config.CRYPTO_WALLETS[cryptoType];
+        
         await safeReply(interaction, {
-            content: `📧 **PAYPAL Wallet Address:**\n\`D.Dovganyuk2409@gmail.com\`\n\n*Select and copy the address above!*`,
+            content: `📋 **${cryptoType} Wallet Address:**\n\`${wallet}\`\n\n*Select and copy the address above!*`,
             ephemeral: true
         });
         return;
