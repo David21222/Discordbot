@@ -432,7 +432,7 @@ async function handleButtonInteractions(interaction) {
     // PayPal email copy button
     if (interaction.customId === 'copy_paypal_email') {
         await safeReply(interaction, {
-            content: `📧 **PayPal Email Address:**\n\`D.Dovganyuk2409@gmail.com\`\n\n*Select and copy the email address above!*\n\n**Remember:**\n• Send as Friends & Family\n• Include your Discord username in the note\n• Record the payment process`,
+            content: `📧 **PAYPAL Wallet Address:**\n\`D.Dovganyuk2409@gmail.com\`\n\n*Select and copy the address above!*`,
             ephemeral: true
         });
         return;
