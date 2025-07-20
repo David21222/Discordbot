@@ -189,7 +189,7 @@ async function handleMessageCommands(client, message) {
                 .addComponents(
                     new ButtonBuilder()
                         .setCustomId('copy_paypal_email')
-                        .setLabel('Copy PayPal Email')
+                        .setLabel('Copy PayPal')
                         .setStyle(ButtonStyle.Primary)
                         .setEmoji('1393746529101156383')
                 );
