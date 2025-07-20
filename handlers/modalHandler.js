@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType,
 const { hasStaffRole, safeReply, parseAmount, calculatePrice, formatNumber, calculateCoinsForMoney } = require('../utils/utils');
 const { activeListings, activeTickets, ticketMessages, botStats } = require('../utils/stats');
 const { createBuyerNotificationEmbed } = require('../utils/embeds');
+const { addTrade, getOrCreateUser } = require('../utils/database');
 const config = require('../config/config');
 
 async function handleModalSubmissions(interaction) {
