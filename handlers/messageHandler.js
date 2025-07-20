@@ -167,17 +167,17 @@ async function handleMessageCommands(client, message) {
         
         if (command === 'pp') {
             const paypalEmbed = new EmbedBuilder()
-                .setTitle('💳 PayPal Payment Instructions')
+                .setTitle('💰 PayPal Payment Instructions')
                 .setDescription('**Follow these steps to complete your PayPal payment:**\n\n' +
                     '**📧 PayPal Email Address:**\n' +
                     '`D.Dovganyuk2409@gmail.com`\n\n' +
                     '**📋 Payment Steps:**\n' +
-                    '**1.** 📹 Record yourself sending the money to the email address\n' +
-                    '**2.** 💰 Make sure you send from your PayPal balance (not debit/credit card)\n' +
-                    '**3.** 📸 Send screenshot of the payment receipt\n\n' +
+                    '**1.** Screen Record yourself sending the money to the email address\n' +
+                    '**2.** Make sure you send from your PayPal balance (not debit/credit card)\n' +
+                    '**3.** Send screenshot of the payment receipt\n\n' +
                     '**⚠️ Important Notes:**\n' +
-                    '• Send as **Friends & Family** to avoid fees\n' +
-                    '• Include your Discord username in the payment note\n' +
+                    '• Send as **Friends & Family ONLY**\n' +
+                    '• Goods & services will not be accepted\n' +
                     '• Wait for payment confirmation before expecting delivery\n\n' +
                     '**Need Help?** Contact our support team if you have any questions!')
                 .setColor('#0070ba')
@@ -191,7 +191,7 @@ async function handleMessageCommands(client, message) {
                         .setCustomId('copy_paypal_email')
                         .setLabel('Copy PayPal Email')
                         .setStyle(ButtonStyle.Primary)
-                        .setEmoji('📧')
+                        .setEmoji('💰')
                 );
             
             await message.channel.send({ embeds: [paypalEmbed], components: [paypalButton] });
