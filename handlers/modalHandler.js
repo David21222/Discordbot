@@ -119,12 +119,8 @@ async function handleModalSubmissions(interaction) {
                 ephemeral: true
             });
         }
-        }
         return;
     }
-}
-
-module.exports = { handleModalSubmissions };
     
     // Handle owner selection modal
     if (interaction.customId === 'owner_selection') {
@@ -238,6 +234,143 @@ module.exports = { handleModalSubmissions };
             components: [paymentButtons],
             ephemeral: true
         });
+        return;
+    }
+    
+    // Handle ticket configuration for closing (updated to handle new ID format)
+    if (interaction.customId === 'ticket_configure_close' || interaction.customId.startsWith('ticket_configure_')) {
+        const channelId = interaction.customId.includes('_close') ? interaction.channel.id : interaction.customId.split('_')[2];
+        
+        const coinsText = interaction.fields.getTextInputValue('trade_coins');
+        const priceText = interaction.fields.getTextInputValue('trade_price');
+        const buyerText = interaction.fields.getTextInputValue('trade_buyer');
+        const sellerText = interaction.fields.getTextInputValue('trade_seller');
+        const paymentMethod = interaction.fields.getTextInputValue('trade_payment');
+        
+        // Parse and validate inputs
+        const price = parseFloat(priceText.replace(/[^0-9.]/g, ''));
+        if (isNaN(price) || price <= 0) {
+            await safeReply(interaction, {
+                content: '❌ Invalid price. Please enter a valid number.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        // Parse buyer and seller IDs
+        let buyerId = buyerText.replace(/[<@!>]/g, '');
+        let sellerId = sellerText.replace(/[<@!>]/g, '');
+        
+        // If seller is "David's Coins", use the bot owner ID
+        if (sellerText.toLowerCase().includes('david') || sellerText.toLowerCase().includes('coins')) {
+            sellerId = config.OWNER_USER_ID;
+        }
+        
+        try {
+            // Validate users exist
+            const buyer = await interaction.client.users.fetch(buyerId);
+            let seller;
+            if (sellerId === config.OWNER_USER_ID) {
+                seller = { username: 'David\'s Coins', id: config.OWNER_USER_ID };
+            } else {
+                seller = await interaction.client.users.fetch(sellerId);
+            }
+            
+            // Record the trade
+            const tradeData = {
+                type: coinsText.toLowerCase().includes('account') ? 'account_purchase' : 
+                      buyerId === config.OWNER_USER_ID ? 'sell' : 'buy',
+                amount: coinsText,
+                price: price,
+                buyerId: buyerId,
+                sellerId: sellerId,
+                buyerUsername: buyer.username,
+                sellerUsername: seller.username || 'David\'s Coins',
+                paymentMethod: paymentMethod,
+                channelId: channelId,
+                notes: `Ticket: ${interaction.channel.name}`
+            };
+            
+            addTrade(tradeData);
+            
+            // Clean up temp data if it exists
+            if (interaction.client.tempTicketData) {
+                interaction.client.tempTicketData.delete(channelId);
+            }
+            
+            // Close the ticket
+            const { finalizeTicketClosure } = require('./buttonHandler');
+            await finalizeTicketClosure(interaction, tradeData);
+            
+        } catch (error) {
+            console.error('Error processing trade:', error);
+            await safeReply(interaction, {
+                content: '❌ Error processing trade. Please check user IDs and try again.',
+                ephemeral: true
+            });
+        }
+        return;
+    }
+    
+    // Handle manual history configuration
+    if (interaction.customId === 'manual_history_configure') {
+        const userIdText = interaction.fields.getTextInputValue('user_id');
+        const tradesText = interaction.fields.getTextInputValue('trade_history');
+        
+        let userId = userIdText.replace(/[<@!>]/g, '');
+        
+        try {
+            const user = await interaction.client.users.fetch(userId);
+            
+            // Parse trade history
+            const trades = tradesText.split('\n').filter(line => line.trim());
+            
+            let successCount = 0;
+            for (const tradeLine of trades) {
+                try {
+                    // Parse each trade line
+                    // Expected format: "buy 500M $20 PayPal 2024-01-15" or "sell 1B $35 BTC 2024-01-10"
+                    const parts = tradeLine.trim().split(' ');
+                    if (parts.length >= 4) {
+                        const type = parts[0].toLowerCase();
+                        const amount = parts[1];
+                        const price = parseFloat(parts[2].replace(/[^0-9.]/g, ''));
+                        const paymentMethod = parts[3];
+                        const date = parts[4] || new Date().toISOString();
+                        
+                        if ((type === 'buy' || type === 'sell') && !isNaN(price)) {
+                            const tradeData = {
+                                type: type,
+                                amount: amount,
+                                price: price,
+                                buyerId: type === 'buy' ? userId : config.OWNER_USER_ID,
+                                sellerId: type === 'sell' ? userId : config.OWNER_USER_ID,
+                                buyerUsername: type === 'buy' ? user.username : 'David\'s Coins',
+                                sellerUsername: type === 'sell' ? user.username : 'David\'s Coins',
+                                paymentMethod: paymentMethod,
+                                notes: 'Manual history entry'
+                            };
+                            
+                            addTrade(tradeData);
+                            successCount++;
+                        }
+                    }
+                } catch (tradeError) {
+                    console.error('Error parsing trade:', tradeLine, tradeError);
+                }
+            }
+            
+            await safeReply(interaction, {
+                content: `✅ Successfully added ${successCount} trades to ${user.username}'s history!`,
+                ephemeral: true
+            });
+            
+        } catch (error) {
+            await safeReply(interaction, {
+                content: '❌ Invalid user ID. Please check and try again.',
+                ephemeral: true
+            });
+        }
         return;
     }
     
@@ -437,134 +570,8 @@ module.exports = { handleModalSubmissions };
             embeds: [updateEmbed],
             ephemeral: true
         });
-    // Handle ticket configuration for closing
-    if (interaction.customId === 'ticket_configure_close') {
-        const coinsText = interaction.fields.getTextInputValue('trade_coins');
-        const priceText = interaction.fields.getTextInputValue('trade_price');
-        const buyerText = interaction.fields.getTextInputValue('trade_buyer');
-        const sellerText = interaction.fields.getTextInputValue('trade_seller');
-        const paymentMethod = interaction.fields.getTextInputValue('trade_payment');
-        
-        // Parse and validate inputs
-        const price = parseFloat(priceText.replace(/[^0-9.]/g, ''));
-        if (isNaN(price) || price <= 0) {
-            await safeReply(interaction, {
-                content: '❌ Invalid price. Please enter a valid number.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        // Parse buyer and seller IDs
-        let buyerId = buyerText.replace(/[<@!>]/g, '');
-        let sellerId = sellerText.replace(/[<@!>]/g, '');
-        
-        // If seller is "David's Coins", use the bot owner ID
-        if (sellerText.toLowerCase().includes('david') || sellerText.toLowerCase().includes('coins')) {
-            sellerId = config.OWNER_USER_ID;
-        }
-        
-        try {
-            // Validate users exist
-            const buyer = await interaction.client.users.fetch(buyerId);
-            let seller;
-            if (sellerId === config.OWNER_USER_ID) {
-                seller = { username: 'David\'s Coins', id: config.OWNER_USER_ID };
-            } else {
-                seller = await interaction.client.users.fetch(sellerId);
-            }
-            
-            // Record the trade
-            const { addTrade } = require('./buttonHandler');
-            const tradeData = {
-                type: coinsText.toLowerCase().includes('account') ? 'account_purchase' : 'buy',
-                amount: coinsText,
-                price: price,
-                buyerId: buyerId,
-                sellerId: sellerId,
-                buyerUsername: buyer.username,
-                sellerUsername: seller.username || 'David\'s Coins',
-                paymentMethod: paymentMethod,
-                channelId: interaction.channel.id,
-                notes: `Ticket: ${interaction.channel.name}`
-            };
-            
-            addTrade(tradeData);
-            
-            // Close the ticket
-            await finalizeTicketClosure(interaction, tradeData);
-            
-        } catch (error) {
-            console.error('Error processing trade:', error);
-            await safeReply(interaction, {
-                content: '❌ Error processing trade. Please check user IDs and try again.',
-                ephemeral: true
-            });
-        }
         return;
     }
-    
-    // Handle manual history configuration
-    if (interaction.customId === 'manual_history_configure') {
-        const userIdText = interaction.fields.getTextInputValue('user_id');
-        const tradesText = interaction.fields.getTextInputValue('trade_history');
-        
-        let userId = userIdText.replace(/[<@!>]/g, '');
-        
-        try {
-            const user = await interaction.client.users.fetch(userId);
-            
-            // Parse trade history
-            const trades = tradesText.split('\n').filter(line => line.trim());
-            const { getOrCreateUser, addTrade } = require('./buttonHandler');
-            
-            let successCount = 0;
-            for (const tradeLine of trades) {
-                try {
-                    // Parse each trade line
-                    // Expected format: "buy 500M $20 PayPal 2024-01-15" or "sell 1B $35 BTC 2024-01-10"
-                    const parts = tradeLine.trim().split(' ');
-                    if (parts.length >= 4) {
-                        const type = parts[0].toLowerCase();
-                        const amount = parts[1];
-                        const price = parseFloat(parts[2].replace(/[^0-9.]/g, ''));
-                        const paymentMethod = parts[3];
-                        const date = parts[4] || new Date().toISOString();
-                        
-                        if ((type === 'buy' || type === 'sell') && !isNaN(price)) {
-                            const tradeData = {
-                                type: type,
-                                amount: amount,
-                                price: price,
-                                buyerId: type === 'buy' ? userId : config.OWNER_USER_ID,
-                                sellerId: type === 'sell' ? userId : config.OWNER_USER_ID,
-                                buyerUsername: type === 'buy' ? user.username : 'David\'s Coins',
-                                sellerUsername: type === 'sell' ? user.username : 'David\'s Coins',
-                                paymentMethod: paymentMethod,
-                                notes: 'Manual history entry'
-                            };
-                            
-                            addTrade(tradeData);
-                            successCount++;
-                        }
-                    }
-                } catch (tradeError) {
-                    console.error('Error parsing trade:', tradeLine, tradeError);
-                }
-            }
-            
-            await safeReply(interaction, {
-                content: `✅ Successfully added ${successCount} trades to ${user.username}'s history!`,
-                ephemeral: true
-            });
-            
-        } catch (error) {
-            await safeReply(interaction, {
-                content: '❌ Invalid user ID. Please check and try again.',
-                ephemeral: true
-            });
-        }
-        return;
-    }
+}
 
 module.exports = { handleModalSubmissions };
