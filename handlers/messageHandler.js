@@ -191,7 +191,7 @@ async function handleMessageCommands(client, message) {
                         .setCustomId('copy_paypal_email')
                         .setLabel('Copy PayPal Email')
                         .setStyle(ButtonStyle.Primary)
-                        .setEmoji('💰')
+                        .setEmoji('1393746529101156383')
                 );
             
             await message.channel.send({ embeds: [paypalEmbed], components: [paypalButton] });
