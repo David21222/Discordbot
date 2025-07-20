@@ -167,7 +167,7 @@ async function handleMessageCommands(client, message) {
         
         if (command === 'pp') {
             const paypalEmbed = new EmbedBuilder()
-                .setTitle('💰 PayPal Payment Instructions')
+                .setTitle('<:paypal:1393746529101156383> PayPal Payment Instructions')
                 .setDescription('**Follow these steps to complete your PayPal payment:**\n\n' +
                     '**📧 PayPal Email Address:**\n' +
                     '`D.Dovganyuk2409@gmail.com`\n\n' +
