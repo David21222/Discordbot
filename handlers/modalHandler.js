@@ -237,15 +237,15 @@ async function handleModalSubmissions(interaction) {
         return;
     }
     
-    // Handle ticket configuration for closing (updated to handle new ID format)
-    if (interaction.customId === 'ticket_configure_close' || interaction.customId.startsWith('ticket_configure_')) {
-        const channelId = interaction.customId.includes('_close') ? interaction.channel.id : interaction.customId.split('_')[2];
+    // Handle ticket configuration for closing (SIMPLIFIED FOR DAVID'S COINS)
+    if (interaction.customId.startsWith('trade_configure_')) {
+        const channelId = interaction.customId.split('_')[2];
         
         const coinsText = interaction.fields.getTextInputValue('trade_coins');
         const priceText = interaction.fields.getTextInputValue('trade_price');
-        const buyerText = interaction.fields.getTextInputValue('trade_buyer');
-        const sellerText = interaction.fields.getTextInputValue('trade_seller');
+        const customerText = interaction.fields.getTextInputValue('trade_customer');
         const paymentMethod = interaction.fields.getTextInputValue('trade_payment');
+        const tradeType = interaction.fields.getTextInputValue('trade_type').toLowerCase();
         
         // Parse and validate inputs
         const price = parseFloat(priceText.replace(/[^0-9.]/g, ''));
@@ -257,38 +257,25 @@ async function handleModalSubmissions(interaction) {
             return;
         }
         
-        // Parse buyer and seller IDs
-        let buyerId = buyerText.replace(/[<@!>]/g, '');
-        let sellerId = sellerText.replace(/[<@!>]/g, '');
-        
-        // If seller is "David's Coins", use the bot owner ID
-        if (sellerText.toLowerCase().includes('david') || sellerText.toLowerCase().includes('coins')) {
-            sellerId = config.OWNER_USER_ID;
-        }
+        // Parse customer ID
+        let customerId = customerText.replace(/[<@!>]/g, '');
         
         try {
-            // Validate users exist
-            const buyer = await interaction.client.users.fetch(buyerId);
-            let seller;
-            if (sellerId === config.OWNER_USER_ID) {
-                seller = { username: 'David\'s Coins', id: config.OWNER_USER_ID };
-            } else {
-                seller = await interaction.client.users.fetch(sellerId);
-            }
+            // Validate customer exists
+            const customer = await interaction.client.users.fetch(customerId);
             
-            // Record the trade
+            // Record the trade (David is always the seller)
             const tradeData = {
-                type: coinsText.toLowerCase().includes('account') ? 'account_purchase' : 
-                      buyerId === config.OWNER_USER_ID ? 'sell' : 'buy',
+                type: tradeType,
                 amount: coinsText,
                 price: price,
-                buyerId: buyerId,
-                sellerId: sellerId,
-                buyerUsername: buyer.username,
-                sellerUsername: seller.username || 'David\'s Coins',
+                buyerId: tradeType === 'sell' ? config.OWNER_USER_ID : customerId,
+                sellerId: tradeType === 'sell' ? customerId : config.OWNER_USER_ID,
+                buyerUsername: tradeType === 'sell' ? 'David\'s Coins' : customer.username,
+                sellerUsername: tradeType === 'sell' ? customer.username : 'David\'s Coins',
                 paymentMethod: paymentMethod,
                 channelId: channelId,
-                notes: `Ticket: ${interaction.channel.name}`
+                notes: `Ticket: ${interaction.channel.name} (Configured)`
             };
             
             addTrade(tradeData);
@@ -298,14 +285,22 @@ async function handleModalSubmissions(interaction) {
                 interaction.client.tempTicketData.delete(channelId);
             }
             
-            // Close the ticket
-            const { finalizeTicketClosure } = require('./buttonHandler');
-            await finalizeTicketClosure(interaction, tradeData);
+            // Show success message
+            await safeReply(interaction, {
+                content: `✅ Trade configured and recorded successfully!\n\n**Details:**\n• Type: ${tradeData.type.toUpperCase()}\n• Amount: ${tradeData.amount}\n• Price: ${tradeData.price}\n• Customer: ${customer.username}\n• Payment: ${paymentMethod}\n\nClosing ticket...`,
+                ephemeral: true
+            });
+            
+            // Close the ticket after short delay
+            setTimeout(async () => {
+                const { finalizeTicketClosure } = require('./buttonHandler');
+                await finalizeTicketClosure(interaction, tradeData);
+            }, 2000);
             
         } catch (error) {
-            console.error('Error processing trade:', error);
+            console.error('Error processing configured trade:', error);
             await safeReply(interaction, {
-                content: '❌ Error processing trade. Please check user IDs and try again.',
+                content: '❌ Error processing trade. Please check the customer ID and try again.',
                 ephemeral: true
             });
         }
