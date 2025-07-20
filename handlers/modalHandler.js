@@ -119,8 +119,12 @@ async function handleModalSubmissions(interaction) {
                 ephemeral: true
             });
         }
+        }
         return;
     }
+}
+
+module.exports = { handleModalSubmissions };
     
     // Handle owner selection modal
     if (interaction.customId === 'owner_selection') {
