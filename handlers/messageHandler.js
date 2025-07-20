@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType 
 const { safeDeleteMessage, hasStaffRole } = require('../utils/utils');
 const { ticketMessages, botStats } = require('../utils/stats');
 const { createInfoEmbed, createCryptoEmbed, createRulesEmbed, createTOSEmbed, createPaymentsEmbed, createHelpEmbed } = require('../utils/embeds');
+const { getUser, getOrCreateUser, getTopTraders, getUserHistory, getRecentTrades, getStatsForPeriod, formatCurrency, formatNumber, getServerStats } = require('../utils/database');
 const config = require('../config/config');
 
 async function handleMessageCommands(client, message) {
@@ -200,6 +201,301 @@ async function handleMessageCommands(client, message) {
                 );
             
             await message.channel.send({ embeds: [paypalEmbed], components: [paypalButton] });
+            botStats.messagesSent++;
+            return;
+        }
+        
+        // Stats command
+        if (command === 'stats') {
+            const serverStats = getServerStats();
+            const dailyStats = getStatsForPeriod('daily');
+            const weeklyStats = getStatsForPeriod('weekly');
+            const monthlyStats = getStatsForPeriod('monthly');
+            
+            const statsEmbed = new EmbedBuilder()
+                .setTitle('📊 Server Trading Statistics')
+                .setDescription('**Complete trading overview and analytics**')
+                .addFields(
+                    { 
+                        name: '🏆 Overall Stats', 
+                        value: `**Total Trades:** ${formatNumber(serverStats.totalTrades)}\n` +
+                               `**Total Revenue:** ${formatCurrency(serverStats.totalRevenue)}\n` +
+                               `**Active Traders:** ${formatNumber(serverStats.totalUsers)}\n` +
+                               `**Average Trade:** ${formatCurrency(serverStats.totalTrades > 0 ? serverStats.totalRevenue / serverStats.totalTrades : 0)}`,
+                        inline: true 
+                    },
+                    { 
+                        name: '📅 Today', 
+                        value: `**Trades:** ${dailyStats.trades}\n` +
+                               `**Revenue:** ${formatCurrency(dailyStats.revenue)}`,
+                        inline: true 
+                    },
+                    { 
+                        name: '📈 This Week', 
+                        value: `**Trades:** ${weeklyStats.trades}\n` +
+                               `**Revenue:** ${formatCurrency(weeklyStats.revenue)}`,
+                        inline: true 
+                    },
+                    { 
+                        name: '📊 This Month', 
+                        value: `**Trades:** ${monthlyStats.trades}\n` +
+                               `**Revenue:** ${formatCurrency(monthlyStats.revenue)}`,
+                        inline: true 
+                    },
+                    { 
+                        name: '🎯 Bot Stats', 
+                        value: `**Uptime:** ${Math.floor((Date.now() - botStats.startTime) / 3600000)}h\n` +
+                               `**Tickets Created:** ${botStats.ticketsCreated}\n` +
+                               `**Messages Sent:** ${botStats.messagesSent}`,
+                        inline: true 
+                    },
+                    { 
+                        name: '🔥 Activity', 
+                        value: `**Profiles Listed:** ${botStats.profilesListed}\n` +
+                               `**Commands Used:** ${formatNumber(botStats.messagesSent)}\n` +
+                               `**Server Health:** 🟢 Excellent`,
+                        inline: true 
+                    }
+                )
+                .setColor('#00ff00')
+                .setFooter({ text: 'David\'s Coins - Trading Analytics' })
+                .setTimestamp();
+            
+            await message.channel.send({ embeds: [statsEmbed] });
+            botStats.messagesSent++;
+            return;
+        }
+        
+        // Leaderboards command
+        if (command === 'leaderboard' || command === 'lb') {
+            const type = args[1] || 'volume'; // volume, trades, buys, sells, reputation
+            let topTraders = [];
+            let title = '';
+            let description = '';
+            
+            switch (type.toLowerCase()) {
+                case 'volume':
+                    topTraders = getTopTraders('volume', 10);
+                    title = '💰 Top Traders by Volume';
+                    description = 'Traders ranked by total USD volume traded';
+                    break;
+                case 'trades':
+                    topTraders = getTopTraders('trades', 10);
+                    title = '🔄 Top Traders by Count';
+                    description = 'Traders ranked by number of completed trades';
+                    break;
+                case 'buys':
+                    topTraders = getTopTraders('buys', 10);
+                    title = '🛒 Top Buyers';
+                    description = 'Users with the most buy transactions';
+                    break;
+                case 'sells':
+                    topTraders = getTopTraders('sells', 10);
+                    title = '🏪 Top Sellers';
+                    description = 'Users with the most sell transactions';
+                    break;
+                case 'reputation':
+                    topTraders = getTopTraders('reputation', 10);
+                    title = '⭐ Most Trusted Traders';
+                    description = 'Traders with the highest reputation ratings';
+                    break;
+                default:
+                    topTraders = getTopTraders('volume', 10);
+                    title = '💰 Top Traders by Volume';
+                    description = 'Traders ranked by total USD volume traded';
+            }
+            
+            let leaderboardText = '';
+            if (topTraders.length === 0) {
+                leaderboardText = '*No traders found. Start trading to appear on the leaderboard!*';
+            } else {
+                topTraders.forEach((trader, index) => {
+                    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+                    let statValue = '';
+                    
+                    switch (type.toLowerCase()) {
+                        case 'volume':
+                            statValue = formatCurrency(trader.trades.totalVolume);
+                            break;
+                        case 'trades':
+                            statValue = `${trader.trades.total} trades`;
+                            break;
+                        case 'buys':
+                            statValue = `${trader.trades.buys} buys`;
+                            break;
+                        case 'sells':
+                            statValue = `${trader.trades.sells} sells`;
+                            break;
+                        case 'reputation':
+                            statValue = `${trader.reputation.rating.toFixed(1)}⭐ (${trader.reputation.totalRatings} ratings)`;
+                            break;
+                    }
+                    
+                    leaderboardText += `${medal} **${trader.username}** - ${statValue}\n`;
+                });
+            }
+            
+            const leaderboardEmbed = new EmbedBuilder()
+                .setTitle(title)
+                .setDescription(`${description}\n\n${leaderboardText}`)
+                .setColor('#ffd700')
+                .setFooter({ text: 'David\'s Coins - Leaderboards • Use !lb [volume/trades/buys/sells/reputation]' })
+                .setTimestamp();
+            
+            await message.channel.send({ embeds: [leaderboardEmbed] });
+            botStats.messagesSent++;
+            return;
+        }
+        
+        // Profile command
+        if (command === 'profile') {
+            let targetUser = message.author;
+            
+            // Check if user mentioned someone
+            if (message.mentions.users.size > 0) {
+                targetUser = message.mentions.users.first();
+            } else if (args[1]) {
+                // Try to find user by ID
+                try {
+                    targetUser = await message.client.users.fetch(args[1]);
+                } catch (error) {
+                    await message.channel.send('❌ User not found. Use `!profile @user` or `!profile userID`.').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+            }
+            
+            const userProfile = getUser(targetUser.id);
+            if (!userProfile) {
+                await message.channel.send(`❌ No trading profile found for ${targetUser.username}. They need to complete a trade first!`).then(msg => {
+                    setTimeout(() => safeDeleteMessage(msg), 5000);
+                });
+                return;
+            }
+            
+            const joinedDate = new Date(userProfile.joinDate).toLocaleDateString();
+            const lastActive = new Date(userProfile.lastActive).toLocaleDateString();
+            const avgTradeValue = userProfile.trades.total > 0 ? userProfile.trades.totalVolume / userProfile.trades.total : 0;
+            
+            const profileEmbed = new EmbedBuilder()
+                .setTitle(`👤 ${userProfile.username}'s Trading Profile`)
+                .setDescription(`**Trader since ${joinedDate}**`)
+                .addFields(
+                    {
+                        name: '📈 Trading Stats',
+                        value: `**Total Trades:** ${userProfile.trades.total}\n` +
+                               `**Buys:** ${userProfile.trades.buys}\n` +
+                               `**Sells:** ${userProfile.trades.sells}\n` +
+                               `**Total Volume:** ${formatCurrency(userProfile.trades.totalVolume)}`,
+                        inline: true
+                    },
+                    {
+                        name: '⭐ Reputation',
+                        value: `**Rating:** ${userProfile.reputation.rating.toFixed(1)}/5.0 ⭐\n` +
+                               `**Total Ratings:** ${userProfile.reputation.totalRatings}\n` +
+                               `**Trust Level:** ${userProfile.reputation.rating >= 4.5 ? '🟢 Excellent' : 
+                                                  userProfile.reputation.rating >= 4.0 ? '🟡 Good' : 
+                                                  userProfile.reputation.rating >= 3.0 ? '🟠 Average' : '🔴 Poor'}`,
+                        inline: true
+                    },
+                    {
+                        name: '📊 Analytics',
+                        value: `**Avg Trade Value:** ${formatCurrency(avgTradeValue)}\n` +
+                               `**Last Active:** ${lastActive}\n` +
+                               `**Status:** ${userProfile.isActive ? '🟢 Active' : '🔴 Inactive'}`,
+                        inline: true
+                    }
+                )
+                .setColor(userProfile.reputation.rating >= 4.5 ? '#00ff00' : 
+                         userProfile.reputation.rating >= 4.0 ? '#ffff00' : 
+                         userProfile.reputation.rating >= 3.0 ? '#ff8800' : '#ff0000')
+                .setThumbnail(targetUser.displayAvatarURL())
+                .setFooter({ text: 'David\'s Coins - Trading Profiles • Use !history to see trade history' })
+                .setTimestamp();
+            
+            await message.channel.send({ embeds: [profileEmbed] });
+            botStats.messagesSent++;
+            return;
+        }
+        
+        // Trading history command
+        if (command === 'history') {
+            let targetUser = message.author;
+            
+            // Check if user mentioned someone
+            if (message.mentions.users.size > 0) {
+                targetUser = message.mentions.users.first();
+            } else if (args[1]) {
+                try {
+                    targetUser = await message.client.users.fetch(args[1]);
+                } catch (error) {
+                    await message.channel.send('❌ User not found. Use `!history @user` or `!history userID`.').then(msg => {
+                        setTimeout(() => safeDeleteMessage(msg), 5000);
+                    });
+                    return;
+                }
+            }
+            
+            const userHistory = getUserHistory(targetUser.id, 15);
+            if (userHistory.length === 0) {
+                await message.channel.send(`❌ No trading history found for ${targetUser.username}.`).then(msg => {
+                    setTimeout(() => safeDeleteMessage(msg), 5000);
+                });
+                return;
+            }
+            
+            let historyText = '';
+            userHistory.forEach((trade, index) => {
+                const date = new Date(trade.timestamp).toLocaleDateString();
+                const isUserBuyer = trade.buyerId === targetUser.id;
+                const emoji = isUserBuyer ? '🛒' : '🏪';
+                const action = isUserBuyer ? 'Bought' : 'Sold';
+                const amount = trade.type === 'account_purchase' ? 'Account' : formatNumber(trade.amount);
+                
+                historyText += `${emoji} **${action}** ${amount} for ${formatCurrency(trade.price)} - *${date}*\n`;
+            });
+            
+            const historyEmbed = new EmbedBuilder()
+                .setTitle(`📜 ${targetUser.username}'s Trading History`)
+                .setDescription(`**Recent transactions (last 15):**\n\n${historyText}`)
+                .setColor('#0099ff')
+                .setThumbnail(targetUser.displayAvatarURL())
+                .setFooter({ text: 'David\'s Coins - Trading History • 🛒 = Buy | 🏪 = Sell' })
+                .setTimestamp();
+            
+            await message.channel.send({ embeds: [historyEmbed] });
+            botStats.messagesSent++;
+            return;
+        }
+        
+        // Recent trades command
+        if (command === 'recent') {
+            const recentTrades = getRecentTrades(10);
+            if (recentTrades.length === 0) {
+                await message.channel.send('❌ No recent trades found.').then(msg => {
+                    setTimeout(() => safeDeleteMessage(msg), 5000);
+                });
+                return;
+            }
+            
+            let tradesText = '';
+            recentTrades.forEach((trade) => {
+                const date = new Date(trade.timestamp).toLocaleDateString();
+                const emoji = trade.type === 'buy' ? '🛒' : trade.type === 'sell' ? '🏪' : '🏦';
+                const amount = trade.type === 'account_purchase' ? 'Account' : formatNumber(trade.amount);
+                
+                tradesText += `${emoji} ${formatCurrency(trade.price)} - ${amount} - *${date}*\n`;
+            });
+            
+            const recentEmbed = new EmbedBuilder()
+                .setTitle('🕒 Recent Trades')
+                .setDescription(`**Latest completed transactions:**\n\n${tradesText}`)
+                .setColor('#9d4edd')
+                .setFooter({ text: 'David\'s Coins - Recent Activity • 🛒 = Buy | 🏪 = Sell | 🏦 = Account' })
+                .setTimestamp();
+            
+            await message.channel.send({ embeds: [recentEmbed] });
             botStats.messagesSent++;
             return;
         }
