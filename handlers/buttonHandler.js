@@ -16,50 +16,7 @@ async function handleButtonInteractions(interaction) {
         await safeReply(interaction, {
             content: '🔔 **Toggle Ping**\n\nYou will be notified if the price drops on this listing!\n\n*This feature is currently in development.*',
             ephemeral: true
-        }
-    
-    // 🎯 ABSOLUTE FINAL CONFIRM - Record trade and close ticket
-    if (interaction.customId === 'absolute_final_confirm') {
-        console.log(`🏁 Absolute final confirm clicked`);
-        
-        // Get the stored trade data
-        if (!interaction.client.tempTradeData || !interaction.client.tempTradeData.has(interaction.user.id)) {
-            await safeReply(interaction, {
-                content: '❌ Trade data not found. Please try the configure process again.',
-                ephemeral: true
-            });
-            return;
-        }
-        
-        const finalTradeData = interaction.client.tempTradeData.get(interaction.user.id);
-        console.log(`💼 Recording final trade:`, finalTradeData);
-        
-        try {
-            // Record the trade to database
-            addTrade(finalTradeData);
-            console.log(`✅ Trade recorded successfully to database`);
-            
-            await safeReply(interaction, {
-                content: `✅ **Trade Recorded Successfully!**\n\n**Details:**\n• Type: ${finalTradeData.type.toUpperCase()}\n• Amount: ${finalTradeData.amount}\n• Price: ${finalTradeData.price}\n• Customer: ${finalTradeData.customer}\n• Payment: ${finalTradeData.payment}\n\n🔒 **Creating transcript and closing ticket in 5 seconds...**`,
-                ephemeral: true
-            });
-            
-            // Clean up temp data
-            interaction.client.tempTradeData.delete(interaction.user.id);
-            
-            // Close ticket with trade data after 5 seconds
-            setTimeout(async () => {
-                await finalizeTicketClosure(interaction, finalTradeData);
-            }, 5000);
-            
-        } catch (error) {
-            console.error(`❌ Error recording final trade:`, error);
-            await safeReply(interaction, {
-                content: '❌ Error recording trade to database. Please contact an administrator.',
-                ephemeral: true
-            });
-        }
-        return;);
+        });
         return;
     }
     
@@ -593,7 +550,7 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // 🎯 EXACTLY AS REQUESTED - Close ticket button
+    // ✅ ENHANCED CLOSE TICKET BUTTON - EXACTLY AS REQUESTED
     if (interaction.customId === 'confirm_close') {
         if (!hasStaffRole(member)) {
             await safeReply(interaction, {
@@ -612,7 +569,9 @@ async function handleButtonInteractions(interaction) {
             return;
         }
         
-        // Extract ticket information from channel messages or create default
+        console.log(`🎫 Processing ticket closure for channel: ${channel.name}`);
+        
+        // Extract ticket information from channel messages
         const messages = ticketMessages.get(channel.id) || [];
         let tradeDetails = {
             type: 'Unknown',
@@ -681,10 +640,10 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // 🎯 Final confirm - record trade and close ticket
+    // ✅ FINAL CONFIRM BUTTON - Record trade and close ticket
     if (interaction.customId === 'final_confirm_trade') {
         await safeReply(interaction, {
-            content: '🔄 Creating transcript and closing ticket...',
+            content: '🔄 Creating transcript and closing ticket in 5 seconds...',
             ephemeral: true
         });
         
@@ -695,7 +654,7 @@ async function handleButtonInteractions(interaction) {
         return;
     }
     
-    // 🎯 Configure trade - open modal
+    // ✅ CONFIGURE TRADE BUTTON - Open modal
     if (interaction.customId === 'configure_trade') {
         const configureModal = new ModalBuilder()
             .setCustomId('final_configure_trade')
@@ -745,6 +704,50 @@ async function handleButtonInteractions(interaction) {
         configureModal.addComponents(firstRow, secondRow, thirdRow, fourthRow, fifthRow);
         
         await interaction.showModal(configureModal);
+        return;
+    }
+    
+    // ✅ ABSOLUTE FINAL CONFIRM - Record trade and close ticket
+    if (interaction.customId === 'absolute_final_confirm') {
+        console.log(`🏁 Absolute final confirm clicked`);
+        
+        // Get the stored trade data
+        if (!interaction.client.tempTradeData || !interaction.client.tempTradeData.has(interaction.user.id)) {
+            await safeReply(interaction, {
+                content: '❌ Trade data not found. Please try the configure process again.',
+                ephemeral: true
+            });
+            return;
+        }
+        
+        const finalTradeData = interaction.client.tempTradeData.get(interaction.user.id);
+        console.log(`💼 Recording final trade:`, finalTradeData);
+        
+        try {
+            // Record the trade to database
+            addTrade(finalTradeData);
+            console.log(`✅ Trade recorded successfully to database`);
+            
+            await safeReply(interaction, {
+                content: `✅ **Trade Recorded Successfully!**\n\n**Details:**\n• Type: ${finalTradeData.type.toUpperCase()}\n• Amount: ${finalTradeData.amount}\n• Price: ${finalTradeData.price}\n• Customer: ${finalTradeData.customer}\n• Payment: ${finalTradeData.payment}\n\n🔒 **Creating transcript and closing ticket in 5 seconds...**`,
+                ephemeral: true
+            });
+            
+            // Clean up temp data
+            interaction.client.tempTradeData.delete(interaction.user.id);
+            
+            // Close ticket with trade data after 5 seconds
+            setTimeout(async () => {
+                await finalizeTicketClosure(interaction, finalTradeData);
+            }, 5000);
+            
+        } catch (error) {
+            console.error(`❌ Error recording final trade:`, error);
+            await safeReply(interaction, {
+                content: '❌ Error recording trade to database. Please contact an administrator.',
+                ephemeral: true
+            });
+        }
         return;
     }
     
@@ -902,7 +905,7 @@ async function finalizeTicketClosure(interaction, tradeData = null) {
             }
         }
         
-        console.log(`⏰ Waiting 5 seconds before deleting channel...`);
+        console.log(`⏰ Deleting channel in 5 seconds...`);
         
         // Delete channel after 5 seconds as requested
         setTimeout(async () => {
